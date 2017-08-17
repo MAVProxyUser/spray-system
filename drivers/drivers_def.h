@@ -1,0 +1,103 @@
+/**
+  ******************** (C) COPYRIGHT 2010 DJI **********************************
+  *
+  * @Project Name       : BL_WKM2_LED_IAP.uvproj
+  * @File Name          : drivers.h
+  * @Environment        : keil mdk4.12/LPC1765/100M cclock
+  * @Author&Date        : 2011-03-03 
+  * @Version            : 1.00
+  ******************************************************************************
+  * @Description
+  *	    lpc17xx derivers define         
+  */
+
+/* Define to prevent recursive inclusion -------------------------------------*/
+#ifndef __DRIVERS_DEF_H__
+#define __DRIVERS_DEF_H__
+
+
+/*$PAGE*/
+/*
+*********************************************************************************************************
+*                                    CONFIGURE STANDARD DATA TYPES
+*
+* Note(s) : (1) Configure standard data types according to CPU-/compiler-specifications.
+*
+*           (2) (a) (1) 'CPU_FNCT_VOID' data type defined to replace the commonly-used function pointer
+*                       data type of a pointer to a function which returns void & has no arguments.
+*
+*                   (2) Example function pointer usage :
+*
+*                           CPU_FNCT_VOID  FnctName;
+*
+*                           FnctName();
+*
+*               (b) (1) 'CPU_FNCT_PTR'  data type defined to replace the commonly-used function pointer
+*                       data type of a pointer to a function which returns void & has a single void
+*                       pointer argument.
+*
+*                   (2) Example function pointer usage :
+*
+*                           CPU_FNCT_PTR   FnctName;
+*                           void          *p_obj
+*
+*                           FnctName(p_obj);
+*********************************************************************************************************
+*/
+
+#define __W610_OFDM__
+//#define __W610_GRC__
+//#define __W610_CB__
+
+#if defined( __W610_OFDM__ )
+    #define __CAN1_ENABLE__     (1)
+//    #define __CAN2_ENABLE__     (0)
+      #define __CAN1_PIN021_PIN022__
+//		#define __CAN1_PIN000_PIN001__
+//    #define __CAN2_PIN207_PIN208__
+#elif defined( __W610_GRC__ )
+    #define __USB_ENABLE__      (1)
+#elif defined( __W610_CB__ )
+    #define __CAN1_ENABLE__     (1)
+
+#endif
+
+typedef            void        CPU_VOID;
+typedef            char        CPU_CHAR;                        /*  8-bit character                                     */
+typedef  unsigned  char        CPU_BOOLEAN;                     /*  8-bit boolean or logical                            */
+typedef  unsigned  char        CPU_INT08U;                      /*  8-bit unsigned integer                              */
+typedef    signed  char        CPU_INT08S;                      /*  8-bit   signed integer                              */
+typedef  unsigned  short       CPU_INT16U;                      /* 16-bit unsigned integer                              */
+typedef    signed  short       CPU_INT16S;                      /* 16-bit   signed integer                              */
+typedef  unsigned  int         CPU_INT32U;                      /* 32-bit unsigned integer                              */
+typedef    signed  int         CPU_INT32S;                      /* 32-bit   signed integer                              */
+typedef  unsigned  long  long  CPU_INT64U;                      /* 64-bit unsigned integer                              */
+typedef    signed  long  long  CPU_INT64S;                      /* 64-bit   signed integer                              */
+
+typedef            float       CPU_FP32;                        /* 32-bit floating point                                */
+typedef            double      CPU_FP64;                        /* 64-bit floating point                                */
+
+
+typedef  volatile  CPU_INT08U  CPU_REG08;                       /*  8-bit register                                      */
+typedef  volatile  CPU_INT16U  CPU_REG16;                       /* 16-bit register                                      */
+typedef  volatile  CPU_INT32U  CPU_REG32;                       /* 32-bit register                                      */
+typedef  volatile  CPU_INT64U  CPU_REG64;                       /* 64-bit register                                      */
+
+
+typedef            void      (*CPU_FNCT_VOID)(void);            /* See Note #2a.                                        */
+typedef            void      (*CPU_FNCT_PTR )(void *);          /* See Note #2b.                                        */
+
+
+/* Exported define -----------------------------------------------------------*/
+typedef enum {DISABLE = 0, ENABLE = !DISABLE} FunctionalState;
+#define PARAM_FUNCTIONALSTATE(State) ((State==DISABLE) || (State==ENABLE))
+
+/* Status type definition */
+typedef enum {ERROR = 0, SUCCESS = !ERROR} Status;
+
+/* brief Flag Status and Interrupt Flag Status type definition */
+typedef enum {RESET = 0, SET = !RESET} FlagStatus, IntStatus, SetState;
+#define PARAM_SETSTATE(State) ((State==RESET) || (State==SET))
+
+/*******************  (C) COPYRIGHT 2010 DJI ************END OF FILE***********/
+#endif

@@ -1,0 +1,409 @@
+/**
+  ******************** (C) COPYRIGHT 2012 DJI **********************************
+  *
+  * @Project Name       : BL_WKM2_MAIN.uvproj
+  * @File Name          : cfg_handler.c
+  * @Environment        : keil mdk4.12/LPC1765/100M cclock
+  * @Author&Date        : 2012-05-28 
+  * @Version            : 1.00
+  ******************************************************************************
+  * @Description
+  *	    Begginning of application   
+  */
+/* Includes ------------------------------------------------------------------*/
+#include <string.h>
+#include "../../cstartup/type.h"
+#include "../../IAP/sbl_iap.h"
+#include "../../IAP/sbl_config.h"
+//#include "../cm_at88/cm_app.h"
+#include "../aes/aes.h"
+#include "../../drivers/drivers.h"
+#include "../md5/MF_MD5.h"
+#include "../crc/MF_CRC8.h"
+#include "../crc/MF_CRC16.h"
+#include "cfg_inc.h"
+#include "../../can/can_inc.h"
+#include "../../usb/vcom_app.h"
+
+int32_t g_cfg_end_point = EP_NULL;
+
+static int32_t cfg_package_index_front = 0;
+static uint32_t cfg_write_offset = 0;
+static uint32_t cfg_file_size = 0;
+static uint8_t tmpBuf[512] __attribute__((aligned(4)));
+
+extern volatile uint32_t g_device_status;
+
+void cmd_headler_send_command_v1( uint8_t *p_buf, uint16_t len )
+{
+	cmd_header_v1_t *p_cmd = ( cmd_header_v1_t * )p_buf;
+	if( p_cmd->vl.length != len ) return;
+	Append_CRC8_Check_Sum( p_buf, 4 );
+	Append_CRC16_Check_Sum( p_buf, p_cmd->vl.length );
+	
+    switch( g_cfg_end_point ) {
+#if __USB_ENABLE__
+    case EP_USB:
+        VCOM_sendpackage( ( const char * )p_buf, p_cmd->vl.length );
+        break;
+#endif    
+#if __CAN1_ENABLE__
+    case EP_CAN1:
+        CAN_sendbytes_View( LPC_CAN1, &can1TxRingBuf, p_buf, p_cmd->vl.length );
+        break;
+#endif
+#if __CAN2_ENABLE__
+    case EP_CAN2:
+        CAN_sendbytes_View( LPC_CAN2, &can2TxRingBuf, p_buf, p_cmd->vl.length );
+        break;
+#endif
+    default:
+        break;
+    }
+}
+
+void cmd_handler_init_header_v1( uint8_t *p_buf, uint16_t len )
+{
+	cmd_header_v1_t *p_cmd = ( cmd_header_v1_t * )p_buf;
+	
+	uint8_t tmp0 = p_cmd->sender.sender_index;
+	uint8_t tmp1 = p_cmd->sender.sender_id;
+	
+	p_cmd->sender.sender_index = p_cmd->receiver.receiver_index;
+	p_cmd->sender.sender_id = p_cmd->receiver.receiver_id;
+	p_cmd->receiver.receiver_index = tmp0;
+	p_cmd->receiver.receiver_id = tmp1;
+	
+	p_cmd->type.cmd_type = 1;
+	p_cmd->type.cmd_ack = 0;
+}
+
+void cmd_handler_device_info( uint8_t *p_buf, uint16_t len )
+{
+    uint8_t result = 0;
+	cmd_header_v1_t *p_cmd = ( cmd_header_v1_t * )p_buf;
+	cmd_device_info_ack_t *p_info = ( cmd_device_info_ack_t * )( p_buf + sizeof( cmd_header_v1_t ) );
+	
+	p_info->command_version.major = 0;
+	p_info->command_version.minor = 1;
+	
+    hardware_id_read_flash( p_info->hardware_ver, 16 );
+	
+	p_info->loader_ver = sbl_get_loader_version();
+    if( p_info->loader_ver == 0xFFFFFFFF ) {
+        result = 0xFF;
+    }
+    
+	p_info->firmware_ver = 0x00000000;
+	p_info->command_set = 0x00000001;
+	
+	if( p_cmd->type.cmd_ack != 0 ) {
+		cmd_handler_init_header_v1( p_buf, len );
+		
+		p_cmd->vl.length = sizeof( cmd_header_v1_t ) + sizeof( cmd_device_info_ack_t ) + 2;
+		p_info->result = result;
+
+		cmd_headler_send_command_v1( p_buf, p_cmd->vl.length );
+	}
+}
+
+void cmd_handler_entry_upgrade( uint8_t *p_buf, uint16_t len )
+{
+	uint8_t result = 0;
+	cmd_header_v1_t *p_cmd = ( cmd_header_v1_t * )p_buf;
+	cmd_entry_upgrade_req_t *p_eur = ( cmd_entry_upgrade_req_t * )( p_buf + sizeof( cmd_header_v1_t ) );
+	cmd_entry_upgrade_ack_t *p_eua = ( cmd_entry_upgrade_ack_t * )( p_buf + sizeof( cmd_header_v1_t ) );
+	
+	if( p_eur->encrypt != 0 ) return;
+	
+	if( p_cmd->type.cmd_ack != 0 ) {
+		cmd_handler_init_header_v1( p_buf, len );
+		
+		p_cmd->vl.length = sizeof( cmd_header_v1_t ) + sizeof( cmd_entry_upgrade_ack_t ) + 2;
+		p_eua->result = result;
+		
+		cmd_headler_send_command_v1( p_buf, p_cmd->vl.length );
+	}
+}
+
+void cmd_handler_start_upgrade( uint8_t *p_buf, uint16_t len )
+{
+	uint8_t result = 0;
+	cmd_header_v1_t *p_cmd = ( cmd_header_v1_t * )p_buf;
+	cmd_start_upgrade_req_t *p_sur = ( cmd_start_upgrade_req_t * )( p_buf + sizeof( cmd_header_v1_t ) );
+	cmd_start_upgrade_ack_t *p_sua = ( cmd_start_upgrade_ack_t * )( p_buf + sizeof( cmd_header_v1_t ) );
+	
+	if( p_sur->encrypt != 0 ) return;
+	
+	if( p_sur->firmware_size > USER_FLASH_END - USER_FLASH_START ) {
+		result = 0xF1;
+	} else {
+		cfg_package_index_front = -1;
+		cfg_write_offset = 0;
+		cfg_file_size = p_sur->firmware_size;
+		
+		aesDecInit();
+		if( !erase_user_area() ) {
+			result = 0xF3;
+		}
+	}
+	
+	if( p_cmd->type.cmd_ack != 0 ) {
+		cmd_handler_init_header_v1( p_buf, len );
+		
+		p_cmd->vl.length = sizeof( cmd_header_v1_t ) + sizeof( cmd_start_upgrade_ack_t ) + 2;
+		p_sua->result = result;
+		p_sua->data_size = 256;
+		
+		cmd_headler_send_command_v1( p_buf, p_cmd->vl.length );
+	}
+}
+
+void cmd_handler_data_upgrade( uint8_t *p_buf, uint16_t len )
+{
+	uint8_t result = 0;
+	cmd_header_v1_t *p_cmd = ( cmd_header_v1_t * )p_buf;
+	cmd_data_upgrade_req_t *p_dur = ( cmd_data_upgrade_req_t * )( p_buf + sizeof( cmd_header_v1_t ) );
+	cmd_data_upgrade_ack_t *p_dua = ( cmd_data_upgrade_ack_t * )( p_buf + sizeof( cmd_header_v1_t ) );
+	
+	if( p_dur->encrypt != 0 && p_dur->encrypt != 1 ) return;
+	
+	if( p_dur->package_index != cfg_package_index_front + 1 ) {
+		result = 0xF0;
+	} else { // write data to flash
+		if( p_dur->package_length != 256 ) {
+			result = 0xF7;
+		} else {
+			if( cfg_write_offset > cfg_file_size ) {
+				result = 0xF1;
+			} else {
+				memcpy( &tmpBuf[0], &p_dur->data[0], p_dur->package_length );
+
+				if( p_dur->encrypt == 1 ) {
+					aesDecryptBlock( &tmpBuf[0], p_dur->package_length );
+				}
+				
+				if( write_flash( ( uint32_t * )( USER_FLASH_START + cfg_write_offset ), &tmpBuf[0], p_dur->package_length ) != 0 ) {
+					result = 0xF4;
+				}	
+				
+				if( !compare_data( ( uint32_t )( USER_FLASH_START + cfg_write_offset ), ( uint32_t )&tmpBuf[0], p_dur->package_length ) ) {
+					result = 0xF4;
+				}
+				
+				if( result == 0 ) {
+					cfg_write_offset += p_dur->package_length;
+					cfg_package_index_front += 1;
+				}
+			}
+		}
+	}
+	
+	if( p_cmd->type.cmd_ack != 0 ) {
+		cmd_handler_init_header_v1( p_buf, len );
+	
+		p_cmd->vl.length = sizeof( cmd_header_v1_t ) + sizeof( cmd_data_upgrade_ack_t ) + 2;
+		p_dua->result = result;
+		if( p_dua->result != 0 ) {
+			p_dua->package_index = cfg_package_index_front;
+		}
+	
+		cmd_headler_send_command_v1( p_buf, p_cmd->vl.length );
+	}
+}
+
+void cmd_handler_end_upgrade( uint8_t *p_buf, uint16_t len )
+{
+	uint8_t result = 0, md5Digest[16], i = 0;
+	cmd_header_v1_t *p_cmd = ( cmd_header_v1_t * )p_buf;
+	cmd_end_upgrade_req_t *p_eur = ( cmd_end_upgrade_req_t * )( p_buf + sizeof( cmd_header_v1_t ) );
+	cmd_end_upgrade_ack_t *p_eua = ( cmd_end_upgrade_ack_t * )( p_buf + sizeof( cmd_header_v1_t ) );
+	
+	if( p_eur->encrypt != 0 ) return;
+	
+	MD5Init( &md5 );
+	MD5Update( &md5, ( uint8_t * )USER_FLASH_START, cfg_file_size );
+	MD5Final( &md5, (void *)md5Digest );
+
+	for( i = 0; i < 16; i++ ) {
+		if( md5Digest[i] != p_eur->md5[i] ) {
+			result = 0xF2;
+			break;
+		}
+	}
+	
+	if( i == 16 ) {
+		write_programming_done_flag();
+	}
+
+	if( p_cmd->type.cmd_ack != 0 ) {
+		cmd_handler_init_header_v1( p_buf, len );
+
+		p_cmd->vl.length = sizeof( cmd_header_v1_t ) + sizeof( cmd_end_upgrade_ack_t ) + 2;
+		p_eua->result = result;
+	
+		cmd_headler_send_command_v1( p_buf, p_cmd->vl.length );
+	}
+}
+
+void cmd_handler_reboot( uint8_t *p_buf, uint16_t len )
+{
+	cmd_header_v1_t *p_cmd = ( cmd_header_v1_t * )p_buf;
+	cmd_reboot_req_t *p_rr = ( cmd_reboot_req_t * )( p_buf + sizeof( cmd_header_v1_t ) );
+	cmd_reboot_ack_t *p_ra = ( cmd_reboot_ack_t * )( p_buf + sizeof( cmd_header_v1_t ) );
+
+    if( p_rr->type == 0 || p_rr->type == 1 ) { 
+        WDT_UpdateTimeOut( p_rr->delay_ms );
+        WDT_Lock();
+    }
+	
+	if( p_cmd->type.cmd_ack != 0 ) {
+		cmd_handler_init_header_v1( p_buf, len );
+	
+		p_cmd->vl.length = sizeof( cmd_header_v1_t ) + sizeof( cmd_reboot_ack_t ) + 2;
+		p_ra->result = 0;
+	
+		cmd_headler_send_command_v1( p_buf, p_cmd->vl.length );
+	}
+}
+
+void cmd_handler_status_report( uint8_t *p_buf, uint16_t len )
+{
+	cmd_header_v1_t *p_cmd = ( cmd_header_v1_t * )p_buf;
+	cmd_status_report_req_t *p_srr = ( cmd_status_report_req_t * )( p_buf + sizeof( cmd_header_v1_t ) );
+	cmd_status_report_ack_t *p_sra = ( cmd_status_report_ack_t * )( p_buf + sizeof( cmd_header_v1_t ) );
+	
+	if( p_cmd->type.cmd_ack != 0 ) {
+		cmd_handler_init_header_v1( p_buf, len );
+	
+		p_cmd->vl.length = sizeof( cmd_header_v1_t ) + sizeof( cmd_status_report_ack_t ) + 2;
+		p_sra->result = 0;
+		
+		p_sra->ver.major = 0;
+		p_sra->ver.minor = 0;
+		
+		p_sra->status = g_device_status;
+	
+		cmd_headler_send_command_v1( p_buf, p_cmd->vl.length );
+	}
+}
+
+void cmd_handler_set_version( uint8_t *p_buf, uint16_t len )
+{
+    uint8_t result = 0;
+	cmd_header_v1_t *p_cmd = ( cmd_header_v1_t * )p_buf;
+	cmd_set_version_req_t *p_svr = ( cmd_set_version_req_t * )( p_buf + sizeof( cmd_header_v1_t ) );
+	cmd_set_version_ack_t *p_sva = ( cmd_set_version_ack_t * )( p_buf + sizeof( cmd_header_v1_t ) );
+	
+    if( !hardware_id_write_flash( p_svr->hardware_ver, 16 ) ) {
+        result = 0xF4;
+    }
+    
+	if( p_cmd->type.cmd_ack != 0 ) {
+		cmd_handler_init_header_v1( p_buf, len );
+	
+		p_cmd->vl.length = sizeof( cmd_header_v1_t ) + sizeof( cmd_set_version_ack_t ) + 2;
+		p_sva->result = result;
+		
+		p_sva->ver.major = 0;
+		p_sva->ver.minor = 0;
+		
+        hardware_id_read_flash( p_sva->hardware_ver, 16 );
+	
+		cmd_headler_send_command_v1( p_buf, p_cmd->vl.length );
+	}
+}
+
+const handler_pair_v0_t cmd_handler_array_v0[] = {
+	{ NULL, NULL }
+};
+
+const handler_pair_v1_t cmd_handler_array_v1[] = {
+	{ cmd_handler_device_info, 		0x01, 0 },
+	{ cmd_handler_entry_upgrade, 	0x07, 0 },
+	{ cmd_handler_start_upgrade, 	0x08, 0 },
+	{ cmd_handler_data_upgrade, 	0x09, 0 },
+	{ cmd_handler_end_upgrade, 		0x0A, 0 },
+	{ cmd_handler_reboot,		    0x0B, 0 },
+	{ cmd_handler_status_report,	0x0C, 0 },
+    { cmd_handler_set_version,      0x0D, 0 },
+	{ NULL, NULL, NULL }
+};
+
+uint8_t get_command_version( uint8_t *p_buf, uint8_t len )
+{
+	uint16_t vl = *( uint16_t * )&p_buf[1];
+	return ( uint8_t )( vl >> 10 );
+}
+
+void command_process_v0( uint8_t *p_buf, uint16_t len )
+{
+	int i = 0;
+	cmd_header_v0_t	*p_cmd  = ( cmd_header_v0_t * )p_buf;
+
+	if( len < sizeof( cmd_header_v0_t ) ) {
+		return;
+	}
+	
+	uart_printf( 0, "[%s, %d] command id: 0x%.4X\r\n", __FILE__, __LINE__, p_cmd->id );
+	for( i = 0; cmd_handler_array_v0[i].handler != NULL; i++ ) {
+		if( p_cmd->id == cmd_handler_array_v0[i].id ) {
+			cmd_handler_array_v0[i].handler( p_buf, len );
+		}
+	}
+}
+
+void command_process_v1( uint8_t *p_buf, uint16_t len )
+{
+	int i = 0;
+	cmd_header_v1_t	*p_cmd  = ( cmd_header_v1_t * )p_buf;
+
+	if( len < sizeof( cmd_header_v1_t ) ) {
+		return;
+	}
+//	uart_printf( 0, "[%s, %d] command id: %d %d %d %d %d\r\n", __FILE__, __LINE__, p_cmd->set, p_cmd->type.encrypt_type, p_cmd->type.cmd_type, p_cmd->receiver.receiver_id, p_cmd->receiver.receiver_index );
+	if( p_cmd->set != 0 || p_cmd->type.encrypt_type != 0 || p_cmd->type.cmd_type != 0 || ( ( p_cmd->receiver.receiver_id != DEVICE_ID || p_cmd->receiver.receiver_index != DEVICE_INDEX  ) && p_cmd->receiver.receiver_id != 31 ) ) {
+		return;
+	}
+	
+	uart_printf( 0, "[%s, %d] command id: 0x%.2X\r\n", __FILE__, __LINE__, p_cmd->id );
+	for( i = 0; cmd_handler_array_v1[i].handler != NULL; i++ ) {
+		if( p_cmd->id == cmd_handler_array_v1[i].id && p_cmd->set == cmd_handler_array_v1[i].set ) {
+			cmd_handler_array_v1[i].handler( p_buf, len );
+		}
+	}
+}
+
+void cfg_status_report( void )
+{
+	uint8_t tmpBuf[128] = { 0 };
+
+	cmd_header_v1_t *p_cmd = ( cmd_header_v1_t * )tmpBuf;
+	cmd_status_report_ack_t *p_sra = ( cmd_status_report_ack_t * )( tmpBuf + sizeof( cmd_header_v1_t ) );
+
+	if( g_device_status == 0 ) return; 
+
+	p_cmd->sof = 0x55;
+	p_cmd->vl.version = 1;
+	p_cmd->sender.sender_id = DEVICE_ID;
+	p_cmd->sender.sender_index = DEVICE_INDEX;
+	p_cmd->receiver.receiver_id = 31; // broadcast
+	p_cmd->receiver.receiver_index = 0;
+	p_cmd->seqnum = 0xFFFF;
+	p_cmd->type.cmd_type = 1;
+	p_cmd->type.cmd_ack = 0;
+	p_cmd->type.encrypt_type = 0;
+	p_cmd->set = 0;
+	p_cmd->id = 0x0C;
+
+	p_sra->result = 0;
+	p_sra->ver.major = 0;
+	p_sra->ver.minor = 0;
+	p_sra->status = g_device_status;
+	
+	p_cmd->vl.length = sizeof( cmd_header_v1_t ) + sizeof( cmd_status_report_ack_t ) + 2;
+	
+	cmd_headler_send_command_v1( tmpBuf, p_cmd->vl.length );
+}
+
+/*******************  (C) COPYRIGHT 2012 DJI ************END OF FILE***********/

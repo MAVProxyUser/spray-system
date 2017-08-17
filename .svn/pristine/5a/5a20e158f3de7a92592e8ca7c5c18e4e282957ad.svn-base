@@ -1,0 +1,44 @@
+;  ******************** (C) COPYRIGHT 2012 DJI **********************************
+;  *
+;  * @Project Name       £ºruling.uvproj
+;  * @File Name          : Lpc1768_IAP_flash.scat
+;  * @Environment        : keil mdk4.12/LPC1768/100M cclock
+;  * @Author&Date        : 2012-06-04 
+;  * @Version            : 1.00
+;  ******************************************************************************
+;  * @Description
+;  *	    link scatter file 
+;  */
+
+;vcom bootloader erea 0x00000000~0x0000BFFF SIZE 0x0000C000 
+LR_IROM1 0x00000000 0x00006000
+{
+	ER_IROM1 0x00000000 0x00006000
+    {
+   	    startup_LPC17xx.o(RESET,+First)
+	    *(+RO)
+    }
+
+    ;lpc1765 internal SRAM 0x10000000~0x10005FFF SIZE 0x00006000
+    ER_IRAM1 0x10000000 0x00006000
+    {
+   	    *(+RW,+ZI)
+    }
+
+    ;for heap and stack	 SIZE (0x0100+0x1E60)
+    ARM_LIB_HEAP 0x10006000 EMPTY  0x00000300 {}	;size 0x0100
+    ARM_LIB_STACK 0x10007F60 EMPTY -0x00001C60 {}   ;size 0x1E60,reserve the top (128+32) bytes of on-chip RAM
+
+    ;AHB SRAM - bank0 0x200C0000~0x2007FFFF SIZE 0x00004000
+;	ER_IRAM2_ETHERNET 0x2007C000 0x00004000
+;    {
+;        *(ETHERNET_RAM)
+;    }
+
+	;AHB SRAM - bank1 0x20080000~0x20083FFF	SIZE 0x00004000
+;	ER_IRAM3_USB 0x20080000 0x00004000
+;	{
+;	    *(USB_RAM) 
+;	}
+}   
+

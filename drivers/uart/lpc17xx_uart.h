@@ -1,0 +1,236 @@
+/**
+  ******************** (C) COPYRIGHT 2012 DJI **********************************
+  *
+  * @Project Name       : BL_WKM2_LED_IAP.uvproj
+  * @File Name          : lpc17xx_uart.c
+  * @Environment        : keil mdk4.12/LPC1765/100M cclock
+  * @Author&Date        : 2012-05-24 
+  * @Version            : 1.10 
+  ******************************************************************************
+  * @Description
+  *	    lpc17xx uart module functions        
+  */
+
+/* Define to prevent recursive inclusion -------------------------------------*/
+#ifndef __LPC17XX_UART_H__
+#define __LPC17XX_UART_H__
+
+/* EXTERNS -------------------------------------------------------------------*/
+#ifdef   UART_MODULE
+#define  EXT
+#else
+#define  EXT  extern
+#endif
+
+/* Private define ------------------------------------------------------------*/
+/* uart enable */
+//#ifdef __DEBUG_UART2_PRINTF__
+//#define UART0_EN   1
+//#else
+//#define UART0_EN   0
+//#endif
+#define UART0_EN   1
+#define UART1_EN   1
+#define UART2_EN   1
+#define UART3_EN   1
+
+/* uart pin bit field */
+#define UART0_PINS                 (DEF_BIT_02 | DEF_BIT_03)
+#define UART1_PINS                 (DEF_BIT_15 | DEF_BIT_16)
+#define UART2_PINS				   (DEF_BIT_11 | DEF_BIT_10)   /* P0.10,P0.11,FUNC2 -- RXD2,TXD2 */
+//#define UART3_PINS                 (DEF_BIT_29 | DEF_BIT_28) /* P4.29,P4.28,FUNC4 -- RXD3,TXD3 */
+#define UART3_PINS                 (DEF_BIT_00 | DEF_BIT_01)  /* P0.0,P0.1,FUNC3 -- RXD3,TXD3 */
+
+/* LCR REGISTER bit field */
+/* Divisor Latch Access Bit */
+#define SET_DLAB                   DEF_BIT_07
+#define CLR_DLAB                   DEF_BIT_NONE
+
+/* FCR bit field & bit mask & bit set */  
+#define FCR_FE                      0u         
+#define FCR_RFR                     1u	  
+#define FCR_TFR                     2u	  
+#define FCR_RTLS                    6u
+
+#define FIFO_ENABLE              	DEF_BIT_00
+#define RX_FIFO_RESET               DEF_BIT_01	  
+#define TX_FIFO_RESET               DEF_BIT_02
+	  
+#define RX_TRI_LS0                  DEF_BIT_NONE
+#define RX_TRI_LS1                  DEF_BIT_06
+#define RX_TRI_LS2                  DEF_BIT_07
+#define RX_TRI_LS3                  (DEF_BIT_06 | DEF_BIT_07)	  
+
+/* FDR div and mul bit filed */
+#define FDR_DIVADDVAL 	 0	  /* DIVADDVAL 3:0 */  
+#define FDR_MULVAL	     4	  /* MULVAL 4:7    */
+
+/* LSR bit filed */
+#define LSR_RDR                    DEF_BIT_00
+#define LSR_OE			           DEF_BIT_01
+#define LSR_PE			           DEF_BIT_02
+#define LSR_FE			           DEF_BIT_03
+#define LSR_BI			           DEF_BIT_04
+#define LSR_THRE		           DEF_BIT_05
+#define LSR_TEMT		           DEF_BIT_06
+#define LSR_RXFE		           DEF_BIT_07
+
+/* IER bit filed  */
+#define IER_RBR_EN				   DEF_BIT_00
+#define IER_THRE_EN				   DEF_BIT_01
+#define IER_RXLS_EN				   DEF_BIT_02
+
+/* Macro defines for Macro defines for UART interrupt identification register */
+#define UART_IIR_INTSTAT_PEND	   ((uint32_t)(1<<0))	/*!<Interrupt Status - Active low */
+#define UART_IIR_INTID_RLS		   ((uint32_t)(3<<1)) 	/*!<Interrupt identification: Receive line status*/
+#define UART_IIR_INTID_RDA		   ((uint32_t)(2<<1)) 	/*!<Interrupt identification: Receive data available*/
+#define UART_IIR_INTID_CTI		   ((uint32_t)(6<<1)) 	/*!<Interrupt identification: Character time-out indicator*/
+#define UART_IIR_INTID_THRE		   ((uint32_t)(1<<1)) 	/*!<Interrupt identification: THRE interrupt*/
+#define UART1_IIR_INTID_MODEM	   ((uint32_t)(0<<1)) 	/*!<Interrupt identification: Modem interrupt*/
+#define UART_IIR_INTID_MASK		   ((uint32_t)(7<<1))	/*!<Interrupt identification: Interrupt ID mask */
+#define UART_IIR_FIFO_EN		   ((uint32_t)(3<<6)) 	/*!<These bits are equivalent to UnFCR[0] */
+#define UART_IIR_ABEO_INT		   ((uint32_t)(1<<8)) 	/*!< End of auto-baud interrupt */
+#define UART_IIR_ABTO_INT		   ((uint32_t)(1<<9)) 	/*!< Auto-baud time-out interrupt */
+#define UART_IIR_BITMASK		   ((uint32_t)(0x3CF))	/*!< UART interrupt identification register bit mask */
+
+
+/* Exported typedef ----------------------------------------------------------*/
+/* uart init struct */
+typedef struct
+{
+    uint32_t UART_BaudRate;
+	uint16_t UART_WordLength;
+	uint16_t UART_StopBits;
+    uint16_t UART_Parity;
+    uint16_t UART_Mode;
+    uint16_t UART_HardwareFlowControl;
+}UART_InitTypeDef;
+
+/* uart send or recieve ring buffer */
+typedef struct
+{
+    uint32_t volatile wrIdx;
+	uint32_t volatile rdIdx;
+	uint32_t          mask;
+	uint8_t          *pBuf;
+}RING_BUF;
+
+/* 环形缓冲区操作 */
+#define RING_BUF_IS_FULL(ring_buf)      ((ring_buf.wrIdx+1)&ring_buf.mask == (ring_buf.rdIdx)&ring_buf.mask) /* Check buf is full or not */
+#define RING_BUF_IS_EMPTY(ring_buf)     ((ring_buf.wrIdx&ring_buf.mask) == (ring_buf.rdIdx&ring_buf.mask))   /* Check buf is empty       */
+#define RING_BUF_COUNT(ring_buf)        ((ring_buf.wrIdx - ring_buf.rdIdx)&ring_buf.mask)                    /* get buf count  */
+#define RING_BUF_RD(ring_buf)           (ring_buf.pBuf[ring_buf.rdIdx++&ring_buf.mask])                      /* get one byte   */
+#define RING_BUF_WR(ring_buf,DataIn) 	(ring_buf.pBuf[ring_buf.wrIdx++&ring_buf.mask] = DataIn)             /* write one byte */
+
+
+/* Exported variables --------------------------------------------------------*/
+#if UART0_EN > 0
+#define TX_BUFFER_SIZE0 256
+#define RX_BUFFER_SIZE0 256
+
+EXT RING_BUF UART0_tx_buf;
+EXT RING_BUF UART0_rx_buf;
+
+EXT uint8_t tx_buffer0[TX_BUFFER_SIZE0];
+EXT uint8_t rx_buffer0[RX_BUFFER_SIZE0];
+#endif 
+
+#if UART1_EN > 0
+#define TX_BUFFER_SIZE1 256
+#define RX_BUFFER_SIZE1 256
+
+EXT RING_BUF UART1_tx_buf;
+EXT RING_BUF UART1_rx_buf;
+
+EXT uint8_t tx_buffer1[TX_BUFFER_SIZE1];
+EXT uint8_t rx_buffer1[RX_BUFFER_SIZE1];
+#endif 
+
+#if UART2_EN > 0
+#define TX_BUFFER_SIZE2 512
+#define RX_BUFFER_SIZE2 512
+
+EXT RING_BUF UART2_tx_buf;
+EXT RING_BUF UART2_rx_buf;
+EXT RING_BUF UART2_rx_buf_copy;
+
+EXT uint8_t tx_buffer2[TX_BUFFER_SIZE2];
+EXT uint8_t rx_buffer2[RX_BUFFER_SIZE2];
+EXT uint8_t rx_buffer2_copy[RX_BUFFER_SIZE2];
+
+#endif
+
+#if UART3_EN > 0
+#define TX_BUFFER_SIZE3 256
+#define RX_BUFFER_SIZE3 256
+
+EXT RING_BUF UART3_tx_buf;
+EXT RING_BUF UART3_rx_buf;
+
+EXT uint8_t tx_buffer3[TX_BUFFER_SIZE3];
+EXT uint8_t rx_buffer3[RX_BUFFER_SIZE3];
+#endif
+
+/* Function Prototypes -------------------------------------------------------*/
+void UARTS_Init(void);
+
+
+#if UART0_EN > 0
+void UART0_BufClr(void);
+/* polling */
+void UART0_putchar(uint8_t c);
+uint8_t UART0_getchar(void);
+
+void UART0_SendByte(uint8_t data);
+uint8_t UART0_ReicieveByte(void);
+
+void UART0_send_pack(uint8_t *buf,uint16_t len);
+#endif
+
+#if UART1_EN > 0
+void UART1_BufClr(void);
+/* polling */
+void UART1_putchar(uint8_t c);
+uint8_t UART1_getchar(void);
+
+void UART1_SendByte(uint8_t data);
+uint8_t UART1_ReicieveByte(void);
+
+void UART1_send_pack(uint8_t *buf,uint16_t len);
+
+//#define RS485_WR()  LPC_GPIO1->FIOSET|=1<< 14
+//#define RS485_RD()  LPC_GPIO1->FIOCLR|=1<< 14
+#endif
+
+#if UART2_EN > 0
+void UART2_BufClr(void);
+/* polling */
+void UART2_putchar(uint8_t c);
+uint8_t UART2_getchar(void);
+
+void UART2_SendByte(uint8_t data);
+uint8_t UART2_ReicieveByte(void);
+
+void UART2_send_pack(uint8_t *buf,uint16_t len);
+
+#define Radar_RS485_WR()  LPC_GPIO1->FIOSET|=1<< 0
+#define Radar_RS485_RD()  LPC_GPIO1->FIOCLR|=1<< 0
+#endif
+
+#if UART3_EN > 0
+void UART3_BufClr(void);
+/* polling */
+void UART3_putchar(uint8_t c);
+uint8_t UART3_getchar(void);
+
+void UART3_SendByte(uint8_t data);
+uint8_t UART3_ReicieveByte(void);
+void UART3_send_pack(uint8_t *buf,uint16_t len);
+#endif
+void uart_printf(uint8_t uart_n,char *pstr, ...);
+void TX_RX1_ON(void);
+void TX_RX2_ON(void);
+void uart_swtich_init(void);
+
+/*******************  (C) COPYRIGHT 2010 DJI ************END OF FILE***********/
+#endif

@@ -1,0 +1,743 @@
+L 1 "app\aes\aes.c"
+N/******************************************************************************* 
+N*                AES Decrypt/Encrypt algorithm functions liboray               * 
+N*   file : aes.c                                                               *
+N*                                                                              *
+N*   history :                                                                  * 
+N*     v1.0 2010-07-26   soure from ourdev                                      *
+N*******************************************************************************/
+N#define BPOLY 0x1b   //!< Lower 8 bits of (x^8+x^4+x^3+x+1), ie. (x^4+x^3+x+1).
+N#define BLOCKSIZE 16 //!< Block size in number of bytes.
+N
+N#define KEY_COUNT 1
+N
+N#if KEY_COUNT == 1
+X#if 1 == 1
+N  #define KEYBITS 128 //!< Use AES128.
+N#elif KEY_COUNT == 2
+S  #define KEYBITS 192 //!< Use AES196.
+S#elif KEY_COUNT == 3
+S  #define KEYBITS 256 //!< Use AES256.
+S#else
+S  #error Use 1, 2 or 3 keys!
+N#endif
+N
+N#if KEYBITS == 128
+X#if 128 == 128
+N  #define ROUNDS 10 //!< Number of rounds.
+N  #define KEYLENGTH 16 //!< Key length in number of bytes.
+N#elif KEYBITS == 192
+S  #define ROUNDS 12 //!< Number of rounds.
+S  #define KEYLENGTH 24 //!< // Key length in number of bytes.
+S#elif KEYBITS == 256
+S  #define ROUNDS 14 //!< Number of rounds.
+S  #define KEYLENGTH 32 //!< Key length in number of bytes.
+S#else
+S  #error Key must be 128, 192 or 256 bits!
+N#endif
+N
+N/* 注意AES的密钥要在XP60中更改 */
+N
+N//AES key,the same with wkm osd
+Nconst unsigned char kTable[32] =  
+N{
+N  	0x96, 0x70, 0x9a, 0xD3, 0x26, 0x67, 0x4A, 0xC3,
+N  	0x82, 0xB6, 0x69, 0x27, 0xE6, 0xd8, 0x84, 0x21,
+N  	0x25, 0xF8, 0xA8, 0x8c, 0x29, 0x2A, 0x15, 0x93,
+N  	0xD5, 0xA5, 0xA3, 0xB2, 0x7B, 0x91, 0x28, 0x67,
+N};
+N
+N//AES key for at88	
+Nconst unsigned char kTableAt88[32] =	  
+N{
+N  	0x82, 0x31, 0x4E, 0x66, 0xE1, 0xD1, 0xF5, 0x13,
+N  	0xB6, 0x53, 0xd2, 0xC6, 0x93, 0x7F, 0x39, 0x72,
+N  	0xC1, 0xa8, 0x3f, 0x8c, 0x29, 0x55, 0x15, 0xC6,
+N  	0x9B, 0xb3, 0x66, 0x28, 0x0a, 0x26, 0xe1, 0x2F,
+N};
+N
+Nunsigned char block1[256]; //!< Workspace 1.
+Nunsigned char block2[256]; //!< Worksapce 2.
+Nunsigned char tempbuf[256];
+Nunsigned char chainBlock[16];
+N
+Nunsigned char *powTbl;  //!< Final location of exponentiation lookup table.
+Nunsigned char *logTbl;  //!< Final location of logarithm lookup table.
+Nunsigned char *sBox;    //!< Final location of s-box.
+Nunsigned char *sBoxInv; //!< Final location of inverse s-box.
+Nunsigned char *expandedKey; //!< Final location of expanded key.
+N
+Nvoid CalcPowLog(unsigned char *powTbl, unsigned char *logTbl)
+N{
+N  	unsigned char i = 0;
+N  	unsigned char t = 1;
+N
+N  	do {
+N    	// Use 0x03 as root for exponentiation and logarithms.
+N    	powTbl[i] = t;
+N    	logTbl[t] = i;
+N    	i++;
+N
+N    	// Muliply t by 3 in GF(2^8).
+N    	t ^= (t << 1) ^ (t & 0x80 ? BPOLY : 0);
+X    	t ^= (t << 1) ^ (t & 0x80 ? 0x1b : 0);
+N  	}while( t != 1 ); // Cyclic properties ensure that i < 255.
+N
+N  	powTbl[255] = powTbl[0]; // 255 = '-0', 254 = -1, etc.
+N}
+N
+N//获得sBOX表
+Nvoid CalcSBox( unsigned char * sBox )
+N{
+N  	unsigned char i, rot;
+N  	unsigned char temp;
+N  	unsigned char result;
+N
+N  	// Fill all entries of sBox[].
+N  	i = 0;
+N  	do {
+N    	//Inverse in GF(2^8).
+N    	if( i > 0 ) 
+N    	{
+N      		temp = powTbl[ 255 - logTbl[i] ];
+N    	} 
+N    	else 
+N    	{
+N      		temp = 0;
+N    	}
+N
+N    	// Affine transformation in GF(2).
+N    	result = temp ^ 0x63; // Start with adding a vector in GF(2).
+N    	for( rot = 4; rot > 0; rot-- )
+N    	{
+N      		// Rotate left.
+N      		temp = (temp<<1) | (temp>>7);
+N
+N      		// Add rotated byte in GF(2).
+N      		result ^= temp;
+N    	}
+N
+N    	// Put result in table.
+N    	sBox[i] = result;
+N  	} while( ++i != 0 );
+N}
+N
+Nvoid CalcSBoxInv( unsigned char * sBox, unsigned char * sBoxInv )
+N{
+N  	unsigned char i = 0;
+N  	unsigned char j = 0;
+N
+N  	// Iterate through all elements in sBoxInv using  i.
+N  	do {
+N	// Search through sBox using j.
+N    	do {
+N      		// Check if current j is the inverse of current i.
+N      		if( sBox[ j ] == i )
+N      		{
+N        		// If so, set sBoxInc and indicate search finished.
+N        		sBoxInv[ i ] = j;
+N        		j = 255;
+N      		}
+N    	} while( ++j != 0 );
+N  	} while( ++i != 0 );
+N}
+N
+N
+N
+Nvoid CycleLeft( unsigned char * row )
+N{
+N  	// Cycle 4 bytes in an array left once.
+N  	unsigned char temp = row[0];
+N
+N  	row[0] = row[1];
+N  	row[1] = row[2];
+N  	row[2] = row[3];
+N  	row[3] = temp;
+N}
+N
+N
+Nvoid CalcCols(unsigned char *col)
+N{
+N  	unsigned char i;
+N
+N  	for(i = 4; i > 0; i--)
+N  	{
+N    	*col = (*col << 1) ^ (*col & 0x80 ? BPOLY : 0);
+X    	*col = (*col << 1) ^ (*col & 0x80 ? 0x1b : 0);
+N    	col++;
+N  	}
+N}
+N
+Nvoid InvMixColumn( unsigned char * column )
+N{
+N  	unsigned char r[4];
+N
+N  	r[0] = column[1] ^ column[2] ^ column[3];
+N  	r[1] = column[0] ^ column[2] ^ column[3];
+N  	r[2] = column[0] ^ column[1] ^ column[3];
+N  	r[3] = column[0] ^ column[1] ^ column[2];
+N
+N  	/*column[0] = (column[0] << 1) ^ (column[0] & 0x80 ? BPOLY : 0);
+N  	column[1] = (column[1] << 1) ^ (column[1] & 0x80 ? BPOLY : 0);
+N  	column[2] = (column[2] << 1) ^ (column[2] & 0x80 ? BPOLY : 0);
+N  	column[3] = (column[3] << 1) ^ (column[3] & 0x80 ? BPOLY : 0);*/
+N  	CalcCols(column);
+N
+N  	r[0] ^= column[0] ^ column[1];
+N  	r[1] ^= column[1] ^ column[2];
+N  	r[2] ^= column[2] ^ column[3];
+N  	r[3] ^= column[0] ^ column[3];
+N
+N  	/*column[0] = (column[0] << 1) ^ (column[0] & 0x80 ? BPOLY : 0);
+N  	column[1] = (column[1] << 1) ^ (column[1] & 0x80 ? BPOLY : 0);
+N  	column[2] = (column[2] << 1) ^ (column[2] & 0x80 ? BPOLY : 0);
+N  	column[3] = (column[3] << 1) ^ (column[3] & 0x80 ? BPOLY : 0);*/
+N  	CalcCols(column);
+N
+N  	r[0] ^= column[0] ^ column[2];
+N  	r[1] ^= column[1] ^ column[3];
+N  	r[2] ^= column[0] ^ column[2];
+N  	r[3] ^= column[1] ^ column[3];
+N
+N  	/*column[0] = (column[0] << 1) ^ (column[0] & 0x80 ? BPOLY : 0);
+N  	column[1] = (column[1] << 1) ^ (column[1] & 0x80 ? BPOLY : 0);
+N  	column[2] = (column[2] << 1) ^ (column[2] & 0x80 ? BPOLY : 0);
+N  	column[3] = (column[3] << 1) ^ (column[3] & 0x80 ? BPOLY : 0);*/
+N  	CalcCols(column);
+N
+N  	column[0] ^= column[1] ^ column[2] ^ column[3];
+N  	r[0] ^= column[0];
+N  	r[1] ^= column[0];
+N  	r[2] ^= column[0];
+N  	r[3] ^= column[0];
+N  
+N  	column[0] = r[0];
+N  	column[1] = r[1];
+N  	column[2] = r[2];
+N  	column[3] = r[3];
+N
+N  	//CopyBytes(column, r, 4);
+N}
+N
+Nvoid SubBytes( unsigned char * bytes, unsigned char count )
+N{
+N	do {
+N	    *bytes = sBox[ *bytes ]; // Substitute every byte in state.
+N	    bytes++;
+N	} while( --count );
+N}
+N
+Nvoid InvSubBytesAndXOR( unsigned char * bytes, unsigned char * key, unsigned char count )
+N{
+N	do {
+N	    // *bytes = sBoxInv[ *bytes ] ^ *key; // Inverse substitute every byte in state and add key.
+N	    *bytes = block2[ *bytes ] ^ *key; // Use block2 directly. Increases speed.
+N	    bytes++;
+N	    key++;
+N	} while( --count );
+N}
+N
+Nvoid InvShiftRows( unsigned char * state )
+N{
+N  	unsigned char temp;
+N
+N  	// Note: State is arranged column by column.
+N
+N  	// Cycle second row right one time.
+N  	temp = state[ 1 + 3*4 ];
+N  	state[ 1 + 3*4 ] = state[ 1 + 2*4 ];
+N  	state[ 1 + 2*4 ] = state[ 1 + 1*4 ];
+N  	state[ 1 + 1*4 ] = state[ 1 + 0*4 ];
+N  	state[ 1 + 0*4 ] = temp;
+N
+N  	// Cycle third row right two times.
+N  	temp = state[ 2 + 0*4 ];
+N  	state[ 2 + 0*4 ] = state[ 2 + 2*4 ];
+N  	state[ 2 + 2*4 ] = temp;
+N  	temp = state[ 2 + 1*4 ];
+N  	state[ 2 + 1*4 ] = state[ 2 + 3*4 ];
+N  	state[ 2 + 3*4 ] = temp;
+N
+N  	// Cycle fourth row right three times, ie. left once.
+N  	temp = state[ 3 + 0*4 ];
+N  	state[ 3 + 0*4 ] = state[ 3 + 1*4 ];
+N  	state[ 3 + 1*4 ] = state[ 3 + 2*4 ];
+N  	state[ 3 + 2*4 ] = state[ 3 + 3*4 ];
+N  	state[ 3 + 3*4 ] = temp;
+N}
+N
+N/*
+Nvoid InvMixColumns( unsigned char * state )
+N{
+N  	InvMixColumn( state + 0*4 );
+N  	InvMixColumn( state + 1*4 );
+N  	InvMixColumn( state + 2*4 );
+N  	InvMixColumn( state + 3*4 );
+N}
+N*/
+N
+Nvoid XORBytes( unsigned char * bytes1, unsigned char * bytes2, unsigned char count )
+N{
+N	do {
+N	    *bytes1 ^= *bytes2; // Add in GF(2), ie. XOR.
+N	    bytes1++;
+N	    bytes2++;
+N	} while( --count );
+N}
+N
+Nvoid CopyBytes( unsigned char * to, unsigned char * from, unsigned char count )
+N{
+N	do {
+N	    *to = *from;
+N	    to++;
+N	    from++;
+N	} while( --count );
+N}
+N
+Nvoid KeyExpansion( unsigned char * expandedKey )
+N{
+N  	unsigned char temp[4];
+N  	unsigned char i;
+N  	unsigned char Rcon[4] = { 0x01, 0x00, 0x00, 0x00 }; // Round constant.
+N
+N  	const unsigned char * key = kTable;
+N
+N  	// Copy key to start of expanded key.
+N  	i = KEYLENGTH;
+X  	i = 16;
+N  	do {
+N    	*expandedKey = *key;
+N    	expandedKey++;
+N    	key++;
+N  	} while( --i );
+N
+N  	// Prepare last 4 bytes of key in temp.
+N  	/*expandedKey -= 4;
+N  	temp[0] = *(expandedKey++);
+N  	temp[1] = *(expandedKey++);
+N  	temp[2] = *(expandedKey++);
+N  	temp[3] = *(expandedKey++);*/
+N  	CopyBytes(temp, expandedKey-4, 4);
+N
+N  	// Expand key.
+N  	i = KEYLENGTH;
+X  	i = 16;
+N  	//j = BLOCKSIZE*(ROUNDS+1) - KEYLENGTH;
+N  	while( i < BLOCKSIZE*(ROUNDS+1) ) 
+X  	while( i < 16*(10+1) ) 
+N  	{
+N    	// Are we at the start of a multiple of the key size?
+N    	if( (i % KEYLENGTH) == 0 )
+X    	if( (i % 16) == 0 )
+N    	{
+N      		CycleLeft( temp ); // Cycle left once.
+N      		SubBytes( temp, 4 ); // Substitute each byte.
+N      		XORBytes( temp, Rcon, 4 ); // Add constant in GF(2).
+N      		*Rcon = (*Rcon << 1) ^ (*Rcon & 0x80 ? BPOLY : 0);
+X      		*Rcon = (*Rcon << 1) ^ (*Rcon & 0x80 ? 0x1b : 0);
+N    	}
+N
+N    	// Keysize larger than 24 bytes, ie. larger that 192 bits?
+N    	#if KEYLENGTH > 24
+X    	#if 16 > 24
+S    	// Are we right past a block size?
+S    	else if( (i % KEYLENGTH) == BLOCKSIZE ) {
+S      		SubBytes( temp, 4 ); // Substitute each byte.
+S    	}
+N    	#endif
+N
+N    	// Add bytes in GF(2) one KEYLENGTH away.
+N    	XORBytes( temp, expandedKey - KEYLENGTH, 4 );
+X    	XORBytes( temp, expandedKey - 16, 4 );
+N
+N    	// Copy result to current 4 bytes.
+N    	*(expandedKey++) = temp[ 0 ];
+N    	*(expandedKey++) = temp[ 1 ];
+N    	*(expandedKey++) = temp[ 2 ];
+N    	*(expandedKey++) = temp[ 3 ];
+N    	//CopyBytes(expandedKey, temp, 4);
+N    	//expandedKey += 4;
+N
+N    	i += 4; // Next 4 bytes.
+N  	}
+N}
+N
+Nvoid KeyExpansionAt88( unsigned char * expandedKey )
+N{
+N  	unsigned char temp[4];
+N  	unsigned char i;
+N  	unsigned char Rcon[4] = { 0x01, 0x00, 0x00, 0x00 }; // Round constant.
+N
+N  	const unsigned char * key = kTableAt88;
+N
+N  	// Copy key to start of expanded key.
+N  	i = KEYLENGTH;
+X  	i = 16;
+N  	do {
+N    	*expandedKey = *key;
+N    	expandedKey++;
+N    	key++;
+N  	} while( --i );
+N
+N  	// Prepare last 4 bytes of key in temp.
+N  	/*expandedKey -= 4;
+N  	temp[0] = *(expandedKey++);
+N  	temp[1] = *(expandedKey++);
+N  	temp[2] = *(expandedKey++);
+N  	temp[3] = *(expandedKey++);*/
+N  	CopyBytes(temp, expandedKey-4, 4);
+N
+N  	// Expand key.
+N  	i = KEYLENGTH;
+X  	i = 16;
+N  	//j = BLOCKSIZE*(ROUNDS+1) - KEYLENGTH;
+N  	while( i < BLOCKSIZE*(ROUNDS+1) ) 
+X  	while( i < 16*(10+1) ) 
+N  	{
+N    	// Are we at the start of a multiple of the key size?
+N    	if( (i % KEYLENGTH) == 0 )
+X    	if( (i % 16) == 0 )
+N    	{
+N      		CycleLeft( temp ); // Cycle left once.
+N      		SubBytes( temp, 4 ); // Substitute each byte.
+N      		XORBytes( temp, Rcon, 4 ); // Add constant in GF(2).
+N      		*Rcon = (*Rcon << 1) ^ (*Rcon & 0x80 ? BPOLY : 0);
+X      		*Rcon = (*Rcon << 1) ^ (*Rcon & 0x80 ? 0x1b : 0);
+N    	}
+N
+N    	// Keysize larger than 24 bytes, ie. larger that 192 bits?
+N    	#if KEYLENGTH > 24
+X    	#if 16 > 24
+S    	// Are we right past a block size?
+S    	else if( (i % KEYLENGTH) == BLOCKSIZE ) {
+S      		SubBytes( temp, 4 ); // Substitute each byte.
+S    	}
+N    	#endif
+N
+N    	// Add bytes in GF(2) one KEYLENGTH away.
+N    	XORBytes( temp, expandedKey - KEYLENGTH, 4 );
+X    	XORBytes( temp, expandedKey - 16, 4 );
+N
+N    	// Copy result to current 4 bytes.
+N    	*(expandedKey++) = temp[ 0 ];
+N    	*(expandedKey++) = temp[ 1 ];
+N    	*(expandedKey++) = temp[ 2 ];
+N    	*(expandedKey++) = temp[ 3 ];
+N    	//CopyBytes(expandedKey, temp, 4);
+N    	//expandedKey += 4;
+N
+N    	i += 4; // Next 4 bytes.
+N  	}
+N}
+N
+Nvoid InvCipher( unsigned char * block, unsigned char * expandedKey )
+N{
+N  	unsigned char i, j;
+N  	unsigned char round = ROUNDS-1;
+X  	unsigned char round = 10-1;
+N  	expandedKey += BLOCKSIZE * ROUNDS;
+X  	expandedKey += 16 * 10;
+N
+N  	XORBytes( block, expandedKey, 16 );
+N  	expandedKey -= BLOCKSIZE;
+X  	expandedKey -= 16;
+N
+N  	do {
+N    	InvShiftRows( block );
+N    	InvSubBytesAndXOR( block, expandedKey, 16 );
+N    	expandedKey -= BLOCKSIZE;
+X    	expandedKey -= 16;
+N    	//InvMixColumns( block );
+N    	for(i = 4, j = 0; i > 0; i--, j+=4)
+N      	InvMixColumn( block + j );
+N  	} while( --round );
+N
+N  	InvShiftRows( block );
+N  	InvSubBytesAndXOR( block, expandedKey, 16 );
+N}
+N
+Nvoid aesDecInit(void)
+N{
+N  	powTbl = block1;
+N  	logTbl = block2;
+N  	CalcPowLog( powTbl, logTbl );
+N
+N  	sBox = tempbuf;
+N  	CalcSBox( sBox );
+N
+N  	expandedKey = block1;
+N  	KeyExpansion( expandedKey );
+N
+N  	sBoxInv = block2; // Must be block2.
+N  	CalcSBoxInv( sBox, sBoxInv );
+N}
+N
+Nvoid aesDecrypt( unsigned char * buffer, unsigned char * chainBlock )
+N{
+N  	CopyBytes( tempbuf, buffer, BLOCKSIZE );
+X  	CopyBytes( tempbuf, buffer, 16 );
+N  	InvCipher( buffer, expandedKey );
+N  	XORBytes( buffer, chainBlock, BLOCKSIZE );
+X  	XORBytes( buffer, chainBlock, 16 );
+N  	CopyBytes( chainBlock, tempbuf, BLOCKSIZE );
+X  	CopyBytes( chainBlock, tempbuf, 16 );
+N}
+N
+N//decrypt block
+N/*
+N** Note : nSize must be times of 16
+N*/
+Nvoid aesDecryptBlock(unsigned char *buffer, unsigned int nSize)
+N{
+N  	unsigned int n;
+N	//add 2010-07-27
+N	for(n = 0; n < 16; n++)
+N		chainBlock[n] = 0;
+N
+N  	for(n = nSize; n > 0; n -= 16)
+N  	{
+N    	CopyBytes( tempbuf, buffer, BLOCKSIZE );
+X    	CopyBytes( tempbuf, buffer, 16 );
+N    	InvCipher( buffer, expandedKey );
+N		// 在aes加密的基础上，增加了一异或
+N    	XORBytes( buffer, chainBlock, BLOCKSIZE );
+X    	XORBytes( buffer, chainBlock, 16 );
+N    	CopyBytes( chainBlock, tempbuf, BLOCKSIZE );
+X    	CopyBytes( chainBlock, tempbuf, 16 );
+N    	buffer += 16;
+N  	}
+N}
+N
+N//add 2010-10-19
+Nvoid aesDecryptAt88(unsigned char *buffer)
+N{
+N  	unsigned int n;
+N
+N	//add 2010-10-19
+N	powTbl = block1;
+N  	logTbl = block2;
+N  	CalcPowLog( powTbl, logTbl );
+N
+N  	sBox = tempbuf;
+N  	CalcSBox( sBox );
+N
+N  	expandedKey = block1;
+N  	KeyExpansionAt88( expandedKey );
+N
+N  	sBoxInv = block2; // Must be block2.
+N  	CalcSBoxInv( sBox, sBoxInv );
+N
+N	//add 2010-07-27
+N	for(n = 0; n < 16; n++)
+N		chainBlock[n] = 0;
+N
+N    CopyBytes( tempbuf, buffer, BLOCKSIZE );
+X    CopyBytes( tempbuf, buffer, 16 );
+N    InvCipher( buffer, expandedKey );
+N	// 在aes加密的基础上，增加了一异或
+N    XORBytes( buffer, chainBlock, BLOCKSIZE );
+X    XORBytes( buffer, chainBlock, 16 );
+N}
+N
+Nunsigned char Multiply( unsigned char num, unsigned char factor )
+N{
+N  	unsigned char mask = 1;
+N  	unsigned char result = 0;
+N
+N  	while( mask != 0 ) 
+N  	{
+N    	// Check bit of factor given by mask.
+N    	if( mask & factor ) 
+N    	{
+N      		// Add current multiple of num in GF(2).
+N      		result ^= num;
+N    	}
+N
+N    	// Shift mask to indicate next bit.
+N    	mask <<= 1;
+N
+N    	// Double num.
+N    	num = (num << 1) ^ (num & 0x80 ? BPOLY : 0);
+X    	num = (num << 1) ^ (num & 0x80 ? 0x1b : 0);
+N  	}
+N
+N  	return result;
+N}
+N
+Nunsigned char DotProduct( const unsigned char * vector1, unsigned char * vector2 )
+N{
+N  	unsigned char result = 0 ,i;
+N
+N  	//result ^= Multiply( *vector1++, *vector2++ );
+N  	//result ^= Multiply( *vector1++, *vector2++ );
+N  	//result ^= Multiply( *vector1++, *vector2++ );
+N  	//result ^= Multiply( *vector1  , *vector2   );
+N
+N  	for(i = 4; i > 0; i--)
+N    	result ^= Multiply( *vector1++, *vector2++ );
+N
+N  	return result;
+N}
+N  
+Nconst unsigned char row[8] = {
+N    0x02, 0x03, 0x01, 0x01,
+N    0x02, 0x03, 0x01, 0x01
+N}; // Prepare first row of matrix twice, to eliminate need for cycling.
+Nvoid MixColumn( unsigned char * column )
+N{
+N  	unsigned char result[4];
+N
+N  	// Take dot products of each matrix row and the column vector.
+N  	result[0] = DotProduct( row+0, column );
+N  	result[1] = DotProduct( row+3, column );
+N  	result[2] = DotProduct( row+2, column );
+N  	result[3] = DotProduct( row+1, column );
+N
+N  	// Copy temporary result to original column.
+N  	//column[0] = result[0];
+N  	//column[1] = result[1];
+N  	//column[2] = result[2];
+N  	//column[3] = result[3];
+N  	CopyBytes(column, result, 4);
+N}
+N
+N/*
+Nvoid MixColumns( unsigned char * state )
+N{
+N  	MixColumn( state + 0*4 );
+N  	MixColumn( state + 1*4 );
+N  	MixColumn( state + 2*4 );
+N  	MixColumn( state + 3*4 );
+N}
+N*/
+Nvoid ShiftRows( unsigned char * state )
+N{
+N  	unsigned char temp;
+N  	
+N	// Note: State is arranged column by column.
+N
+N  	// Cycle second row left one time.
+N  	temp = state[ 1 + 0*4 ];
+N  	state[ 1 + 0*4 ] = state[ 1 + 1*4 ];
+N  	state[ 1 + 1*4 ] = state[ 1 + 2*4 ];
+N  	state[ 1 + 2*4 ] = state[ 1 + 3*4 ];
+N  	state[ 1 + 3*4 ] = temp;
+N
+N  	// Cycle third row left two times.
+N  	temp = state[ 2 + 0*4 ];
+N  	state[ 2 + 0*4 ] = state[ 2 + 2*4 ];
+N  	state[ 2 + 2*4 ] = temp;
+N  	temp = state[ 2 + 1*4 ];
+N  	state[ 2 + 1*4 ] = state[ 2 + 3*4 ];
+N  	state[ 2 + 3*4 ] = temp;
+N
+N  	// Cycle fourth row left three times, ie. right once.
+N  	temp = state[ 3 + 3*4 ];
+N  	state[ 3 + 3*4 ] = state[ 3 + 2*4 ];
+N  	state[ 3 + 2*4 ] = state[ 3 + 1*4 ];
+N  	state[ 3 + 1*4 ] = state[ 3 + 0*4 ];
+N  	state[ 3 + 0*4 ] = temp;
+N}
+N
+Nvoid Cipher( unsigned char * block, unsigned char * expandedKey )
+N{
+N  	unsigned char i, j;
+N  	unsigned char round = ROUNDS-1;
+X  	unsigned char round = 10-1;
+N
+N  	XORBytes( block, expandedKey, 16 );
+N  	expandedKey += BLOCKSIZE;
+X  	expandedKey += 16;
+N
+N  	do {
+N    	SubBytes( block, 16 );
+N    	ShiftRows( block );
+N    	//MixColumns( block );
+N    	for(i = 4, j = 0; i > 0; i--, j+=4)
+N      	MixColumn( block + j );
+N    	XORBytes( block, expandedKey, 16 );
+N    	expandedKey += BLOCKSIZE;
+X    	expandedKey += 16;
+N  	} while( --round );
+N
+N  	SubBytes( block, 16 );
+N  	ShiftRows( block );
+N  	XORBytes( block, expandedKey, 16 );
+N}
+N
+Nvoid aesEncInit(void)
+N{
+N  	powTbl = block1;
+N  	logTbl = block2;
+N  	CalcPowLog( powTbl, logTbl );
+N
+N  	sBox = block2;
+N  	CalcSBox( sBox );
+N
+N  	expandedKey = block1;
+N  	KeyExpansion( expandedKey );
+N}
+N
+Nvoid aesEncrypt( unsigned char * buffer, unsigned char * chainBlock )
+N{
+N  	XORBytes( buffer, chainBlock, BLOCKSIZE );
+X  	XORBytes( buffer, chainBlock, 16 );
+N  	Cipher( buffer, expandedKey );
+N  	CopyBytes( chainBlock, buffer, BLOCKSIZE );
+X  	CopyBytes( chainBlock, buffer, 16 );
+N}
+N
+N//EncryptBlock
+N/*
+N** Note : nSize must be times of 16
+N*/
+Nvoid aesEncryptBlock(unsigned char *buffer,unsigned int nSize)
+N{
+N	unsigned int n;
+N
+N	//add 2010-07-27
+N	for(n = 0; n < 16; n++)
+N		chainBlock[n] = 0;
+N
+N	for(n = nSize;n > 0;n -= 16)
+N	{
+N		XORBytes( buffer, chainBlock, BLOCKSIZE );
+X		XORBytes( buffer, chainBlock, 16 );
+N  		Cipher( buffer, expandedKey );
+N  		CopyBytes( chainBlock, buffer, BLOCKSIZE );
+X  		CopyBytes( chainBlock, buffer, 16 );
+N		buffer += 16;
+N	}
+N}
+N
+N
+N//add 2010-10-19
+Nvoid aesEncryptAt88(unsigned char *buffer)
+N{
+N	unsigned int n;
+N
+N	powTbl = block1;
+N  	logTbl = block2;
+N  	CalcPowLog( powTbl, logTbl );
+N
+N  	sBox = block2;
+N  	CalcSBox( sBox );
+N
+N  	expandedKey = block1;
+N  	KeyExpansionAt88( expandedKey );
+N	//add 2010-07-27
+N	for(n = 0; n < 16; n++)
+N		chainBlock[n] = 0;
+N
+N	XORBytes( buffer, chainBlock, BLOCKSIZE );
+X	XORBytes( buffer, chainBlock, 16 );
+N  	Cipher( buffer, expandedKey );
+N  	CopyBytes( chainBlock, buffer, BLOCKSIZE );
+X  	CopyBytes( chainBlock, buffer, 16 );
+N}
+N
+N/*
+N********************************************************************************
+N*                        END
+N********************************************************************************
+N*/

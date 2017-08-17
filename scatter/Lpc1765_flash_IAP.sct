@@ -1,0 +1,55 @@
+;  ******************** (C) COPYRIGHT 2010 DJI **********************************
+;  *
+;  * @Project Name       £ºxp60.uvproj
+;  * @File Name          : Lpc1765_flash.scat
+;  * @Environment        : keil mdk4.12/LPC1765/100M cclock
+;  * @Author&Date        : 2011-01-27 
+;  * @Version            : 1.00
+;  ******************************************************************************
+;  * @Description
+;  *	    link scatter file 
+;  */
+
+;lpc1765 internal flash ROM 0x00000000~0x0003FFFF SIZE 0x00040000 
+LR_IROM1 0x00004000 0x00030000
+{
+	ER_IROM1 0x00004000 0x00030000
+    {
+;   	    vectors.o(VECT,+First)
+;	    init.o(INIT)
+	    *(+RO)
+    }
+	
+    ;lpc1765 internal SRAM 0x10000000~0x10007FFF SIZE 0x00008000
+    ER_IRAM1 0x10000000 0x00007000
+    {
+   	    *(+RW,+ZI)
+    }
+	
+    ;for heap and stack	 SIZE 0x00001000
+    ARM_LIB_HEAP 0x10007000 EMPTY  0x00000200 {}
+    ARM_LIB_STACK 0x10007F80 EMPTY -0X00000D80 {}
+
+    ;AHB SRAM - bank0 0x200C0000~0x2007FFFF SIZE 0x00004000
+	ER_IRAM2_ETHERNET 0x2007C000 0x00004000
+    {
+        *(ETHERNET_RAM)
+    }
+
+	;AHB SRAM - bank1 0x20080000~0x20083FFF	SIZE 0x00004000
+	ER_IRAM3_USB 0x20080000 0x00004000
+	{
+	    *(USB_RAM) 
+	}
+}  
+
+LR_IROM2 0x00000000 0x0004000
+{
+    ER_IROM2 0x00030000 0x00004000
+    {
+   	vectors.o(VECT,+First)
+	    init.o(INIT)
+	    ;*(+RO)
+    }
+}
+

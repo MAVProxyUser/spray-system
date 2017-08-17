@@ -1,0 +1,36 @@
+FLASH ·ÖÇø:
+Sector    Sector
+Number   Size [kB]   Start Address        End Address
+
+0         4          0X0000 0000          0X0000 0FFF 
+1         4          0X0000 1000          0X0000 1FFF 
+2         4          0X0000 2000          0X0000 2FFF 
+3         4          0X0000 3000          0X0000 3FFF 
+4         4          0X0000 4000          0X0000 4FFF 
+5         4          0X0000 5000          0X0000 5FFF 
+6         4          0X0000 6000          0X0000 6FFF 
+7         4          0X0000 7000          0X0000 7FFF
+8         4          0x0000 8000          0X0000 8FFF
+9         4          0x0000 9000          0X0000 9FFF
+10 (0x0A) 4          0x0000 A000          0X0000 AFFF
+11 (0x0B) 4          0x0000 B000          0X0000 BFFF
+12 (0x0C) 4          0x0000 C000          0X0000 CFFF
+13 (0x0D) 4          0x0000 D000          0X0000 DFFF
+14 (0X0E) 4          0x0000 E000          0X0000 EFFF
+15 (0x0F) 4          0x0000 F000          0X0000 FFFF
+16 (0x10) 32         0x0001 0000          0x0001 7FFF
+17 (0x11) 32         0x0001 8000          0x0001 FFFF
+18 (0x12) 32         0x0002 0000          0x0002 7FFF
+19 (0x13) 32         0x0002 8000          0x0002 FFFF
+20 (0x14) 32         0x0003 0000          0x0003 7FFF
+21 (0x15) 32         0x0003 8000          0x0003 FFFF
+
+
+
+LOADER Çø£ºLR_IROM1 0x00000000 0x00007000  // 32k 
+
+
+#define PROGRAM_FLAG_SECTOR         (8) // 4k
+#define HARDWARE_ID_SECTOR          (9) // 4k
+#define USER_START_SECTOR   10
+#define MAX_USER_SECTOR     21

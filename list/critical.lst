@@ -1,0 +1,132 @@
+
+
+
+ARM Macro Assembler    Page 1 
+
+
+    1 00000000         #line   1                "bsp\\critical.asm"
+    1 00000000         ;
+    2 00000000         
+    3 00000000         
+    4 00000000         
+    5 00000000         
+    6 00000000         
+    7 00000000         
+    8 00000000         
+    9 00000000         
+   10 00000000         
+   11 00000000         
+   12 00000000         
+   13 00000000         
+   14 00000000         ; Functions declared in this file.
+   15 00000000                 EXPORT           CPU_SR_Save
+   16 00000000                 EXPORT           CPU_SR_Restore
+   17 00000000         
+   18 00000000         
+   19 00000000         
+   20 00000000         ;*******************************************************
+                       *************************************************
+   21 00000000         ;                                      CODE GENERATION D
+                       IRECTIVES
+   22 00000000         ;*******************************************************
+                       *************************************************
+   23 00000000         
+   24 00000000                 AREA             |.text|,CODE,READONLY,ALIGN=2
+   25 00000000                 THUMB
+   26 00000000                 REQUIRE8
+   27 00000000                 PRESERVE8
+   28 00000000         
+   29 00000000         ;*******************************************************
+                       *************************************************
+   30 00000000         ;                                      CRITICAL SECTION 
+                       FUNCTIONS
+   31 00000000         ;
+   32 00000000         ; Description : Disable/Enable interrupts by preserving 
+                       the state of interrupts.  Generally speaking, the
+   33 00000000         ;               state of the interrupt disable flag is s
+                       tored in the local variable 'cpu_sr' & interrupts
+   34 00000000         ;               are then disabled ('cpu_sr' is allocated
+                        in all functions that need to disable interrupts).
+   35 00000000         ;               The previous interrupt state is restored
+                        by copying 'cpu_sr' into the CPU's status register.
+   36 00000000         ;
+   37 00000000         ; Prototypes  : CPU_SR  CPU_SR_Save   (void);
+   38 00000000         ;               void    CPU_SR_Restore(CPU_SR cpu_sr);
+   39 00000000         ;
+   40 00000000         ; Note(s)     : (1) These functions are used in general 
+                       like this :
+   41 00000000         ;
+   42 00000000         ;                       void  Task (void  *p_arg)
+   43 00000000         ;                       {
+   44 00000000         ;                           CPU_SR_ALLOC();             
+                                
+   45 00000000         ;                               :
+   46 00000000         ;                               :
+   47 00000000         ;                           CPU_CRITICAL_ENTER();       
+
+
+
+ARM Macro Assembler    Page 2 
+
+
+                                
+   48 00000000         ;                               :
+   49 00000000         ;                               :
+   50 00000000         ;                           CPU_CRITICAL_EXIT();        
+                                
+   51 00000000         ;                               :
+   52 00000000         ;                       }
+   53 00000000         ;*******************************************************
+                       *************************************************
+   54 00000000         
+   55 00000000         CPU_SR_Save
+   56 00000000 F3EF 8010       MRS              R0, PRIMASK ; Set prio int mask
+                                                             to mask all (excep
+                                                            t faults)
+   57 00000004 B672            CPSID            I
+   58 00000006 4770            BX               LR
+   59 00000008         
+   60 00000008         
+   61 00000008         CPU_SR_Restore                       ; See Note #2.
+   62 00000008 F380 8810       MSR              PRIMASK, R0
+   63 0000000C 4770            BX               LR
+   64 0000000E         
+   65 0000000E                 END
+Command Line: --debug --xref --cpreproc --diag_suppress=9931 --cpu=Cortex-M3 --
+apcs=interwork --depend=.\output\critical.d -o.\output\critical.o -I.\RTE\_lpc1
+7xx_can_loader_debug -IC:\Keil_v5\ARM\PACK\Keil\LPC1700_DFP\2.3.0\Device\Includ
+e -IC:\Keil_v5\ARM\CMSIS\Include --predefine="__UVISION_VERSION SETA 523" --pre
+define="LPC175x_6x SETA 1" --predefine="NO_CRP SETA 1" --list=.\list\critical.l
+st bsp\critical.asm
+
+
+
+ARM Macro Assembler    Page 1 Alphabetic symbol ordering
+Relocatable symbols
+
+.text 00000000
+
+Symbol: .text
+   Definitions
+      At line 24 in file bsp\\critical.asm
+   Uses
+      None
+Comment: .text unused
+CPU_SR_Restore 00000008
+
+Symbol: CPU_SR_Restore
+   Definitions
+      At line 61 in file bsp\\critical.asm
+   Uses
+      At line 16 in file bsp\\critical.asm
+Comment: CPU_SR_Restore used once
+CPU_SR_Save 00000000
+
+Symbol: CPU_SR_Save
+   Definitions
+      At line 55 in file bsp\\critical.asm
+   Uses
+      At line 15 in file bsp\\critical.asm
+Comment: CPU_SR_Save used once
+3 symbols
+336 symbols in table

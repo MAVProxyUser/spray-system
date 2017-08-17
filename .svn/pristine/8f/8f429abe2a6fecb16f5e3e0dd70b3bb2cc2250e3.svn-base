@@ -1,0 +1,77 @@
+#include "LPC17xx.h"
+#include "../cstartup/type.h"
+#include "../drivers/drivers.h"
+#include "../can/can_inc.h"
+#include "cfg/cfg_unpack.h"
+#include "cfg/cfg_handler.h"
+//#include "cm_at88/cm_app.h"
+#include "../bsp/bsp.h"
+#include "../cstartup/type.h"
+#include "../iap/sbl_iap.h"
+#include "../iap/sbl_config.h"
+#include "../usb/usb_composite_app.h"
+
+volatile uint32_t g_device_status = 0x00000001;
+
+void iap_handler( void )
+{
+	uint32_t clock = 0;
+
+	SystemInit();
+
+	WDT_Init();
+
+	UARTS_Init();	
+#ifdef __CAN__
+	CAN_Init();
+#endif
+#ifdef __USB__
+	USB_Init_CDC();
+#endif
+	TIMER0_Init();
+	
+//	cm_init();
+//	Active_At88sc();
+
+//	get_SerialNumber(&SerialNumber_t[0],32);
+//	for( i = 0; i < 32; i++ ) {
+//		uart_printf( 0, "%c", SerialNumber_t[i] ); 
+//	}
+//	uart_printf( 0, "\r\n" );
+	
+	WDT_Start( 1000 );
+	if( WDT_ResetCheck() ) {
+		uart_printf( 0, "wdt reset\r\n" );
+	}
+	uart_printf( 0, "here\r\n" );
+	
+	TIMER0_Start();
+
+	while( 1 ) {
+		while( !TIMER0_10Ms_Timeout() );
+		clock++;
+		
+		cfg_unpack_tick();
+		
+		WDT_Feed();
+	}
+}
+
+int main( void ) 
+{	
+	LPC_SC->PCONP = 1ul << 15; // close all modules but gpio.
+	
+    LPC_GPIO2->FIODIR |= ( 1 << 2 ) | ( 1 << 4 ) | ( 1 << 5 );
+    LPC_GPIO2->FIOCLR |= ( 1 << 2 ) | ( 1 << 4 ) | ( 1 << 5 );
+    
+	check_iap_entry_init();
+    
+	place_aes_key();
+	
+    if( user_code_present() ) {
+		check_iap_entry_pin();
+	}
+	/* User code not present or isp entry requested */
+	iap_handler();
+}
+

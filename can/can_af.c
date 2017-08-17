@@ -1,0 +1,1154 @@
+/**
+  ******************** (C) COPYRIGHT 2013 DJI **********************************
+  *
+  * @Project Name       : BL_WKM2_MAIN.uvproj
+  * @File Name          : can_af.c
+  * @Environment        : keil mdk4.12/LPC1765/100M cclock
+  * @Author&Date        : 2011-08-31
+  * @Version            : 1.10
+  ******************************************************************************
+  * @Description
+  *	    can Acceptance filter config
+  */
+
+/* Includes ------------------------------------------------------------------*/
+#include "../drivers/drivers.h"
+#include "can_inc.h"
+
+/* filter ID config table */
+AF_SectionDef          AFTable;
+SFF_Entry              SFF_Table[8];
+SFF_GPR_Entry          SFF_GPR_Table[1];
+
+/* Counts number of filters (CAN message objects) used */
+static uint16_t        CANAF_FullCAN_cnt = 0;
+static uint16_t        CANAF_std_cnt = 0;
+static uint16_t        CANAF_gstd_cnt = 0;
+static uint16_t        CANAF_ext_cnt = 0;
+static uint16_t        CANAF_gext_cnt = 0;
+static FunctionalState FULLCAN_ENABLE;
+
+/*********************************************************************//**
+ * @brief		Init AF-Look Up Table Sections entry value
+ * 				We setup entries for 5 sections:
+ * 				- 6 entries for FullCAN Frame Format Section
+ * 				- 6 entries for Explicit Standard ID Frame Format Section
+ * 				- 6 entries for Group of Standard ID Frame Format Section
+ * 				- 6 entries for Explicit Extended ID Frame Format Section
+ * 				- 6 entries for Group of Extended ID Frame Format Section
+ * @param[in]	none
+ * @return 		none
+ **********************************************************************/
+void CAN_InitAFTable(void)
+{
+	CPU_INT32U i = 0;
+    
+	SFF_Table[0].controller = CAN_CTL1;
+	SFF_Table[0].disable    = MSG_ENABLE;
+	SFF_Table[0].id_11      = CAN1_RX_RADAR;
+    
+	SFF_Table[1].controller = CAN_CTL1;
+	SFF_Table[1].disable    = MSG_ENABLE;
+	SFF_Table[1].id_11      = CAN1_RX_ID;	
+
+  SFF_Table[2].controller = CAN_CTL1;
+	SFF_Table[2].disable    = MSG_ENABLE;
+	SFF_Table[2].id_11      = CAN1_UPGRADE_ID;
+
+	SFF_Table[3].controller = CAN_CTL1;
+	SFF_Table[3].disable    = MSG_ENABLE;
+	SFF_Table[3].id_11      = CAN1_RX_ID2;
+	
+//	SFF_GPR_Table[0].controller1 = CAN_CTL1;
+//	SFF_GPR_Table[0].disable1    = MSG_ENABLE;
+//	SFF_GPR_Table[0].lowerID     = CAN1_RX_ID;
+//	SFF_GPR_Table[0].upperID     = CAN1_RX_ID2;
+
+//  SFF_GPR_Table[0].controller2 = CAN_CTL1;
+//	SFF_GPR_Table[0].disable2    = MSG_ENABLE;
+//	SFF_GPR_Table[0].lowerID     = 0x00;
+//	SFF_GPR_Table[0].upperID     = 0x00;
+
+	SFF_GPR_Table[0].controller1 = SFF_GPR_Table[0].controller2 = CAN_CTL1;
+	SFF_GPR_Table[0].disable1    = SFF_GPR_Table[0].disable2    = MSG_DISABLE;
+	SFF_GPR_Table[0].lowerID     = 0x00;
+	SFF_GPR_Table[0].upperID     = 0x00;
+
+	AFTable.FullCAN_Sec      = NULL;
+	AFTable.FC_NumEntry      = 0;
+
+	AFTable.SFF_Sec          = &SFF_Table[0];//NULL;&SFF_Table[0],the sff table is 2   
+	AFTable.SFF_NumEntry     = 4;  //2       
+
+	AFTable.SFF_GPR_Sec      =NULL;          //&SFF_GPR_Table[0]; NULL   
+	AFTable.SFF_GPR_NumEntry =0;  
+
+	AFTable.EFF_Sec          = NULL;  
+	AFTable.EFF_NumEntry     = 0;
+ 
+	AFTable.EFF_GPR_Sec      = NULL;
+	AFTable.EFF_GPR_NumEntry = 0;
+
+	//clear ALUT RAM
+	for (i = 0; i < 512; i++) {
+		LPC_CANAF_RAM->mask[i] = 0xFFFFFFFF; /* 初始化为0xFFFF是最合理的 */
+	}
+
+	if( CAN_OK == CAN_SetupAFLUT( LPC_CANAF, &AFTable )){
+		uart_printf( 0,"CAN INIT OK\r\n" );
+	}
+}
+
+CAN_ERROR CAN_SetupAFLUT(LPC_CANAF_TypeDef* CANAFx, AF_SectionDef* AFSection)
+{
+	uint8_t ctrl1,ctrl2;
+	uint8_t dis1, dis2;
+	uint16_t SID, SID_temp,i, count = 0;
+	uint32_t EID, entry, buf;//EID_temp,
+	uint16_t lowerSID, upperSID;
+	uint32_t lowerEID, upperEID;
+
+	CANAFx->AFMR = 0x01;
+
+/***** setup FullCAN Table *****/
+	if(AFSection->FullCAN_Sec == NULL)
+	{
+		FULLCAN_ENABLE = DISABLE;
+	}
+	else
+	{
+		FULLCAN_ENABLE = ENABLE;
+		for(i=0;i<(AFSection->FC_NumEntry);i++)
+		{
+			if((count+1) > 64)
+			{
+				return CAN_OBJECTS_FULL_ERROR;
+			}
+			ctrl1 = AFSection->FullCAN_Sec->controller;
+			SID = AFSection->FullCAN_Sec->id_11;
+			dis1 = AFSection->FullCAN_Sec->disable;
+
+			entry = 0x00; //reset entry value
+			if((CANAF_FullCAN_cnt & 0x00000001)==0)
+			{
+				if(count!=0x00)
+				{
+					buf = LPC_CANAF_RAM->mask[count-1];
+					SID_temp = (buf & 0xE7FF); //mask controller & identifier bits
+					if(SID_temp > ((ctrl1<<13)|SID))
+					{
+						return CAN_AF_ENTRY_ERROR;
+					}
+				}
+				entry = (ctrl1<<29)|(dis1<<28)|(SID<<16)|(1<<27);
+				LPC_CANAF_RAM->mask[count] &= 0x0000FFFF;
+				LPC_CANAF_RAM->mask[count] |= entry;
+				CANAF_FullCAN_cnt++;
+				if(CANAF_FullCAN_cnt == AFSection->FC_NumEntry) //this is the lastest FullCAN entry
+					count++;
+			}
+			else
+			{
+				buf = LPC_CANAF_RAM->mask[count];
+				SID_temp = (buf >>16) & 0xE7FF;
+				if(SID_temp > ((ctrl1<<13)|SID))
+				{
+					return CAN_AF_ENTRY_ERROR;
+				}
+				entry = (ctrl1<<13)|(dis1<<12)|(SID<<0)|(1<<11);
+				LPC_CANAF_RAM->mask[count] &= 0xFFFF0000;
+				LPC_CANAF_RAM->mask[count]|= entry;
+				count++;
+				CANAF_FullCAN_cnt++;
+			}
+			AFSection->FullCAN_Sec = (FullCAN_Entry *)((uint32_t)(AFSection->FullCAN_Sec)+ sizeof(FullCAN_Entry));
+		}
+	}
+
+/***** Setup Explicit Standard Frame Format Section *****/
+	if(AFSection->SFF_Sec != NULL)
+	{
+		for(i=0;i<(AFSection->SFF_NumEntry);i++)
+		{
+			if(count + 1 > 512)
+			{
+				return CAN_OBJECTS_FULL_ERROR;
+			}
+			ctrl1 = AFSection->SFF_Sec->controller;
+			SID = AFSection->SFF_Sec->id_11;
+			dis1 = AFSection->SFF_Sec->disable;
+
+			entry = 0x00; //reset entry value
+			if((CANAF_std_cnt & 0x00000001)==0)
+			{
+				if(CANAF_std_cnt !=0 )
+				{
+					buf = LPC_CANAF_RAM->mask[count-1];
+					SID_temp = (buf & 0xE7FF); //mask controller & identifier bits
+					if(SID_temp > ((ctrl1<<13)|SID))
+					{
+						return CAN_AF_ENTRY_ERROR;
+					}
+				}
+				entry = (ctrl1<<29)|(dis1<<28)|(SID<<16);
+				LPC_CANAF_RAM->mask[count] &= 0x0000FFFF;
+				LPC_CANAF_RAM->mask[count] |= entry;
+				CANAF_std_cnt++;
+				if(CANAF_std_cnt == AFSection->SFF_NumEntry)//if this is the last SFF entry
+					count++;
+			}
+			else
+			{
+				buf = LPC_CANAF_RAM->mask[count];
+				SID_temp = (buf >>16) & 0xE7FF;
+				if(SID_temp > ((ctrl1<<13)|SID))
+				{
+					return CAN_AF_ENTRY_ERROR;
+				}
+				entry = (ctrl1<<13)|(dis1<<12)|(SID<<0);
+				LPC_CANAF_RAM->mask[count] &= 0xFFFF0000;
+				LPC_CANAF_RAM->mask[count] |= entry;
+				count++;
+				CANAF_std_cnt++;
+			}
+			AFSection->SFF_Sec = (SFF_Entry *)((uint32_t)(AFSection->SFF_Sec)+ sizeof(SFF_Entry));
+		}
+	}
+
+/***** Setup Group of Standard Frame Format Identifier Section *****/
+	if(AFSection->SFF_GPR_Sec != NULL)
+	{
+		for(i=0;i<(AFSection->SFF_GPR_NumEntry);i++)
+		{
+			if(count + 1 > 512)
+			{
+				return CAN_OBJECTS_FULL_ERROR;
+			}
+			ctrl1 = AFSection->SFF_GPR_Sec->controller1;
+			ctrl2 = AFSection->SFF_GPR_Sec->controller2;
+			dis1 = AFSection->SFF_GPR_Sec->disable1;
+			dis2 = AFSection->SFF_GPR_Sec->disable2;
+			lowerSID = AFSection->SFF_GPR_Sec->lowerID;
+			upperSID = AFSection->SFF_GPR_Sec->upperID;
+
+			entry = 0x00;
+			if(CANAF_gstd_cnt!=0)
+			{
+				buf = LPC_CANAF_RAM->mask[count-1];
+				SID_temp = buf & 0xE7FF;
+				if((ctrl1 != ctrl2)||(lowerSID > upperSID)||(SID_temp > ((ctrl1<<13)|lowerSID)))
+				{
+					return CAN_AF_ENTRY_ERROR;
+				}
+			}
+			entry = (ctrl1 << 29)|(dis1 << 28)|(lowerSID << 16)|  \
+					(ctrl2 << 13)|(dis2 << 12)|(upperSID << 0);
+			LPC_CANAF_RAM->mask[count] = entry;
+			CANAF_gstd_cnt++;
+			count++;
+			AFSection->SFF_GPR_Sec = (SFF_GPR_Entry *)((uint32_t)(AFSection->SFF_GPR_Sec)+ sizeof(SFF_GPR_Entry));
+		}
+	}
+
+/***** Setup Explicit Extend Frame Format Identifier Section *****/
+	if(AFSection->EFF_Sec != NULL)
+	{
+		for(i=0;i<(AFSection->EFF_NumEntry);i++)
+		{
+			if(count + 1 > 512)
+			{
+				return CAN_OBJECTS_FULL_ERROR;
+			}
+			EID = AFSection->EFF_Sec->ID_29;
+			ctrl1 = AFSection->EFF_Sec->controller;
+
+			entry = (ctrl1 << 29)|(EID << 0);
+			if(CANAF_ext_cnt != 0)
+			{
+				buf = LPC_CANAF_RAM->mask[count-1];
+//				EID_temp = buf & 0x0FFFFFFF;
+				if(buf > entry)
+				{
+					return CAN_AF_ENTRY_ERROR;
+				}
+			}
+			LPC_CANAF_RAM->mask[count] = entry;
+			CANAF_ext_cnt ++;
+			count++;
+			AFSection->EFF_Sec = (EFF_Entry *)((uint32_t)(AFSection->EFF_Sec)+ sizeof(EFF_Entry));
+		}
+	}
+
+/***** Setup Group of Extended Frame Format Identifier Section *****/
+	if(AFSection->EFF_GPR_Sec != NULL)
+	{
+		for(i=0;i<(AFSection->EFF_GPR_NumEntry);i++)
+		{
+			if(count + 2 > 512)
+			{
+				return CAN_OBJECTS_FULL_ERROR;
+			}
+			ctrl1 = AFSection->EFF_GPR_Sec->controller1;
+			ctrl2 = AFSection->EFF_GPR_Sec->controller2;
+			lowerEID = AFSection->EFF_GPR_Sec->lowerEID;
+			upperEID = AFSection->EFF_GPR_Sec->upperEID;
+
+			entry = 0x00;
+			if(CANAF_gext_cnt != 0)
+			{
+				buf = LPC_CANAF_RAM->mask[count-1];
+//				EID_temp = buf & 0x0FFFFFFF;
+				if((ctrl1 != ctrl2) || (lowerEID > upperEID) || (buf > ((ctrl1 << 29)|(lowerEID << 0))))
+				{
+					return CAN_AF_ENTRY_ERROR;
+				}
+			}
+			entry = (ctrl1 << 29)|(lowerEID << 0);
+			LPC_CANAF_RAM->mask[count++] = entry;
+			entry = (ctrl2 << 29)|(upperEID << 0);
+			LPC_CANAF_RAM->mask[count++] = entry;
+			CANAF_gext_cnt++;
+			AFSection->EFF_GPR_Sec = (EFF_GPR_Entry *)((uint32_t)(AFSection->EFF_GPR_Sec)+ sizeof(EFF_GPR_Entry));
+		}
+	}
+	//update address values
+	LPC_CANAF->SFF_sa = ((CANAF_FullCAN_cnt + 1)>>1)<<2;
+	LPC_CANAF->SFF_GRP_sa = LPC_CANAF->SFF_sa + (((CANAF_std_cnt+1)>>1)<< 2);
+	LPC_CANAF->EFF_sa = LPC_CANAF->SFF_GRP_sa + (CANAF_gstd_cnt << 2);
+	LPC_CANAF->EFF_GRP_sa = LPC_CANAF->EFF_sa + (CANAF_ext_cnt << 2);
+	LPC_CANAF->ENDofTable = LPC_CANAF->EFF_GRP_sa + (CANAF_gext_cnt << 3);
+
+
+	if(FULLCAN_ENABLE == DISABLE)
+	{
+		LPC_CANAF->AFMR = 0x00; // Normal mode
+	}
+	else
+	{
+		LPC_CANAF->AFMR = 0x04;
+	}
+	return CAN_OK;
+}
+
+CAN_ERROR CAN_LoadExplicitEntry(LPC_CAN_TypeDef* CANx, uint32_t id, CAN_ID_FORMAT_Type format)
+{
+	uint32_t tmp0 = 0;
+	uint32_t buf0=0, buf1=0;
+	int16_t cnt1=0, cnt2=0, bound1=0, total=0;
+
+	if (CANx == LPC_CAN1)
+	{
+		tmp0 = 0;
+	}
+	else if (CANx == LPC_CAN2)
+	{
+		tmp0 = 1;
+	}
+
+	/* Acceptance Filter Memory full - return */
+	total =((CANAF_FullCAN_cnt+1)>>1)+ CANAF_FullCAN_cnt*3 +((CANAF_std_cnt + 1) >> 1)+  \
+			CANAF_gstd_cnt + CANAF_ext_cnt + (CANAF_gext_cnt<<1);
+	if (total >= 512){ //don't have enough space
+		return CAN_OBJECTS_FULL_ERROR;
+	}
+
+	/* Setup Acceptance Filter Configuration
+    Acceptance Filter Mode Register = Off */
+	LPC_CANAF->AFMR = 0x00000001;
+
+/*********** Add Explicit Standard Identifier Frame Format entry *********/
+ 	if(format == STD_ID_FORMAT)
+ 	{
+ 		id &= 0x07FF;
+ 		id |= (tmp0 << 13); /* Add controller number */
+		/* Move all remaining sections one place up
+		if new entry will increase FullCAN list */
+
+		//when equal, exit
+		cnt1 = (CANAF_FullCAN_cnt+1)>>1;
+		cnt2 = CANAF_std_cnt;
+		bound1 = ((CANAF_FullCAN_cnt+1)>>1)+((CANAF_std_cnt+1)>>1);
+		while (cnt1 < bound1)
+		{
+			/* Loop through standard existing IDs */
+			if (((LPC_CANAF_RAM->mask[cnt1] >> 16) & 0xE7FF) == id)
+			{
+				cnt2 = cnt1 * 2;
+				goto outcan;
+			}
+	
+			if ((LPC_CANAF_RAM->mask[cnt1] & 0x0000E7FF) == id)
+			{
+				cnt2 = cnt1 * 2 + 1;
+				goto outcan;
+			}
+	
+			cnt1++;
+		}
+
+
+		if ((CANAF_std_cnt & 0x0001) == 0)
+		{
+			cnt1   = ((CANAF_FullCAN_cnt+1)>>1)+((CANAF_std_cnt+1)>>1);
+			bound1 = total - cnt1;
+			buf0   = LPC_CANAF_RAM->mask[cnt1];
+			while(bound1--)
+			{
+				cnt1++;
+				buf1 = LPC_CANAF_RAM->mask[cnt1];
+				LPC_CANAF_RAM->mask[cnt1] = buf0;
+				buf0 = buf1;
+			}
+		}
+		if (CANAF_std_cnt == 0)
+		{
+			cnt2 = (CANAF_FullCAN_cnt + 1)>>1;
+			/* For entering first ID */
+			LPC_CANAF_RAM->mask[cnt2] = 0x0000FFFF | (id << 16);
+		}
+		else if (CANAF_std_cnt == 1)
+		{
+			cnt2 = (CANAF_FullCAN_cnt + 1)>>1;
+			/* For entering second ID */
+			if (((LPC_CANAF_RAM->mask[cnt2] >> 16)& 0xE7FF) > id)
+			{
+				LPC_CANAF_RAM->mask[cnt2] = (LPC_CANAF_RAM->mask[cnt2] >> 16) | (id << 16);
+			}
+			else
+			{
+				LPC_CANAF_RAM->mask[cnt2] = (LPC_CANAF_RAM->mask[cnt2] & 0xFFFF0000) | id;
+			}
+		}
+		else
+		{
+			/* Find where to insert new ID */
+			cnt1 = (CANAF_FullCAN_cnt+1)>>1;
+			cnt2 = CANAF_std_cnt;
+			bound1 = ((CANAF_FullCAN_cnt+1)>>1)+((CANAF_std_cnt+1)>>1);
+			while (cnt1 < bound1)
+			{
+				/* Loop through standard existing IDs */
+				if (((LPC_CANAF_RAM->mask[cnt1] >> 16) & 0xE7FF) > id)
+				{
+					cnt2 = cnt1 * 2;
+					break;
+				}
+
+				if ((LPC_CANAF_RAM->mask[cnt1] & 0x0000E7FF) > id)
+				{
+					cnt2 = cnt1 * 2 + 1;
+					break;
+				}
+
+				cnt1++;
+			}
+			/* cnt1 = U32 where to insert new ID */
+			/* cnt2 = U16 where to insert new ID */
+
+			if (cnt1 == bound1)
+			{
+				/* Adding ID as last entry */
+				/* Even number of IDs exists */
+				if ((CANAF_std_cnt & 0x0001) == 0)
+				{
+					LPC_CANAF_RAM->mask[cnt1]  = 0x0000FFFF | (id << 16);
+				}
+				/* Odd  number of IDs exists */
+				else
+				{
+					LPC_CANAF_RAM->mask[cnt1]  = (LPC_CANAF_RAM->mask[cnt1] & 0xFFFF0000) | id;
+				}
+			}
+			else
+			{
+				buf0 = LPC_CANAF_RAM->mask[cnt1]; /* Remember current entry */
+				if ((cnt2 & 0x0001) == 0)
+				{
+					/* Insert new mask to even address*/
+					buf1 = (id << 16) | (buf0 >> 16);
+				}
+				else
+				{
+					/* Insert new mask to odd  address */
+					buf1 = (buf0 & 0xFFFF0000) | id;
+				}
+				LPC_CANAF_RAM->mask[cnt1] = buf1;/* Insert mask */
+				bound1 = ((CANAF_FullCAN_cnt+1)>>1)+((CANAF_std_cnt+1)>>1)-1;
+				/* Move all remaining standard mask entries one place up */
+				while (cnt1 < bound1)
+				{
+					cnt1++;
+					buf1  = LPC_CANAF_RAM->mask[cnt1];
+					LPC_CANAF_RAM->mask[cnt1] = (buf1 >> 16) | (buf0 << 16);
+					buf0  = buf1;
+				}
+
+				if ((CANAF_std_cnt & 0x0001) == 0)
+				{
+					/* Even number of IDs exists */
+					LPC_CANAF_RAM->mask[cnt1+1] = (buf0 <<16) |(0x0000FFFF);
+				}
+			}
+		}
+		CANAF_std_cnt++;
+		//update address values
+		if((CANAF_std_cnt & 0x0001) == 1)
+		{
+		    LPC_CANAF->SFF_GRP_sa +=0x04 ;
+		    LPC_CANAF->EFF_sa     +=0x04 ;
+		    LPC_CANAF->EFF_GRP_sa +=0x04;
+		    LPC_CANAF->ENDofTable +=0x04;
+ 	    }
+	}
+
+/*********** Add Explicit Extended Identifier Frame Format entry *********/
+ 	else
+ 	{
+ 		/* Add controller number */
+ 		id |= (tmp0) << 29;
+
+ 		cnt1 = ((CANAF_FullCAN_cnt+1)>>1)+(((CANAF_std_cnt + 1) >> 1) + CANAF_gstd_cnt);
+ 		cnt2 = 0;
+ 		while (cnt2 < CANAF_ext_cnt)
+ 		{
+ 			/* Loop through extended existing masks*/
+ 			if (LPC_CANAF_RAM->mask[cnt1] > id)
+ 			{
+ 				break;
+ 			}
+ 			cnt1++;/* cnt1 = U32 where to insert new mask */
+			cnt2++;
+ 		}
+
+ 		buf0 = LPC_CANAF_RAM->mask[cnt1];  /* Remember current entry */
+ 		LPC_CANAF_RAM->mask[cnt1] = id;    /* Insert mask */
+
+ 		CANAF_ext_cnt++;
+
+ 		bound1 = total;
+ 		/* Move all remaining extended mask entries one place up*/
+ 		while (cnt2 < bound1)
+ 		{
+ 			cnt1++;
+ 			cnt2++;
+ 			buf1 = LPC_CANAF_RAM->mask[cnt1];
+ 			LPC_CANAF_RAM->mask[cnt1] = buf0;
+ 			buf0 = buf1;
+ 		}
+ 		/* update address values */
+ 		LPC_CANAF->EFF_GRP_sa += 4;
+ 		LPC_CANAF->ENDofTable += 4;
+ 	}
+outcan:
+ 	if(CANAF_FullCAN_cnt == 0) //not use FullCAN mode
+ 	{
+ 		LPC_CANAF->AFMR = 0x00;//not use FullCAN mode
+ 	}
+ 	else
+ 	{
+ 		LPC_CANAF->AFMR = 0x04;
+ 	}
+
+ 	return CAN_OK;
+}
+
+CAN_ERROR CAN_LoadFullCANEntry (LPC_CAN_TypeDef* CANx, uint16_t id)
+{
+	uint32_t ctrl0 = 0;
+	uint32_t buf0=0, buf1=0, buf2=0;
+	uint32_t tmp0=0, tmp1=0, tmp2=0;
+	int16_t cnt1=0, cnt2=0, bound1=0, total=0;
+
+	if (CANx == LPC_CAN1)
+	{
+		ctrl0 = 0;
+	}
+	else if (CANx == LPC_CAN2)
+	{
+		ctrl0 = 1;
+	}
+
+	/* Acceptance Filter Memory full - return */
+	total =((CANAF_FullCAN_cnt+1)>>1)+ CANAF_FullCAN_cnt*3 +((CANAF_std_cnt + 1) >> 1)+  \
+			CANAF_gstd_cnt + CANAF_ext_cnt + (CANAF_gext_cnt<<1);
+	//don't have enough space for this fullCAN Entry and its Object(3*32 bytes)
+	if ((total >=508)||(CANAF_FullCAN_cnt>=64)){
+		return CAN_OBJECTS_FULL_ERROR;
+	}
+	/* Setup Acceptance Filter Configuration
+    Acceptance Filter Mode Register = Off */
+	LPC_CANAF->AFMR = 0x00000001;
+
+	/* Add mask for standard identifiers   */
+	id &= 0x07FF;
+	id |= (ctrl0 << 13) | (1 << 11); /* Add controller number */
+//	total = ((CANAF_std_cnt + 1) >> 1)+ CANAF_gstd_cnt + CANAF_ext_cnt + (CANAF_gext_cnt<<1);
+	/* Move all remaining sections one place up
+	if new entry will increase FullCAN list */
+	if (((CANAF_FullCAN_cnt & 0x0001) == 0)&&(total!=0))
+	{
+		//then remove remaining section
+		cnt1   = (CANAF_FullCAN_cnt >> 1);
+		bound1 = total;
+		buf0   = LPC_CANAF_RAM->mask[cnt1];
+
+		while (bound1--)
+		{
+			cnt1++;
+			buf1 = LPC_CANAF_RAM->mask[cnt1];
+			LPC_CANAF_RAM->mask[cnt1] = buf0;
+			buf0 = buf1;
+		}
+	}
+	if (CANAF_FullCAN_cnt == 0)
+	{
+		/* For entering first ID */
+		LPC_CANAF_RAM->mask[0] = 0x0000FFFF | (id << 16);
+	}
+	else if (CANAF_FullCAN_cnt == 1)
+	{
+		/* For entering second ID */
+		if (((LPC_CANAF_RAM->mask[0] >> 16)& 0xE7FF) > id)
+		{
+			LPC_CANAF_RAM->mask[0] = (LPC_CANAF_RAM->mask[0] >> 16) | (id << 16);
+		}
+		else
+		{
+			LPC_CANAF_RAM->mask[0] = (LPC_CANAF_RAM->mask[0] & 0xFFFF0000) | id;
+		}
+	}
+	else
+	{
+		/* Find where to insert new ID */
+		cnt1 = 0;
+		cnt2 = CANAF_FullCAN_cnt;
+		bound1 = (CANAF_FullCAN_cnt - 1) >> 1;
+		while (cnt1 <= bound1)
+		{
+			/* Loop through standard existing IDs */
+			if (((LPC_CANAF_RAM->mask[cnt1] >> 16) & 0xE7FF) > (id & 0xE7FF))
+			{
+				cnt2 = cnt1 * 2;
+				break;
+			}
+
+			if ((LPC_CANAF_RAM->mask[cnt1] & 0x0000E7FF) > (id & 0xE7FF))
+			{
+				cnt2 = cnt1 * 2 + 1;
+				break;
+			}
+
+			cnt1++;
+		}
+		/* cnt1 = U32 where to insert new ID */
+		/* cnt2 = U16 where to insert new ID */
+
+		if (cnt1 > bound1)
+		{
+			/* Adding ID as last entry */
+			/* Even number of IDs exists */
+			if ((CANAF_FullCAN_cnt & 0x0001) == 0)
+			{
+				LPC_CANAF_RAM->mask[cnt1]  = 0x0000FFFF | (id << 16);
+			}
+			/* Odd  number of IDs exists */
+			else
+			{
+				LPC_CANAF_RAM->mask[cnt1]  = (LPC_CANAF_RAM->mask[cnt1] & 0xFFFF0000) | id;
+			}
+		}
+		else
+		{
+			buf0 = LPC_CANAF_RAM->mask[cnt1]; /* Remember current entry */
+			if ((cnt2 & 0x0001) == 0)
+			{
+				/* Insert new mask to even address*/
+				buf1 = (id << 16) | (buf0 >> 16);
+			}
+			else
+			{
+				/* Insert new mask to odd  address */
+				buf1 = (buf0 & 0xFFFF0000) | id;
+			}
+			LPC_CANAF_RAM->mask[cnt1] = buf1;/* Insert mask */
+			bound1 = CANAF_FullCAN_cnt >> 1;
+			/* Move all remaining standard mask entries one place up */
+			while (cnt1 < bound1)
+			{
+				cnt1++;
+				buf1  = LPC_CANAF_RAM->mask[cnt1];
+				LPC_CANAF_RAM->mask[cnt1] = (buf1 >> 16) | (buf0 << 16);
+				buf0  = buf1;
+			}
+
+			if ((CANAF_FullCAN_cnt & 0x0001) == 0)
+			{
+				/* Even number of IDs exists */
+				LPC_CANAF_RAM->mask[cnt1] = (LPC_CANAF_RAM->mask[cnt1] & 0xFFFF0000)
+											| (0x0000FFFF);
+			}
+		}
+	}
+	//restruct FulCAN Object Section
+	bound1 = CANAF_FullCAN_cnt - cnt2;
+	cnt1 = total - (CANAF_FullCAN_cnt)*3 + cnt2*3 + 1;
+	buf0 = LPC_CANAF_RAM->mask[cnt1];
+	buf1 = LPC_CANAF_RAM->mask[cnt1+1];
+	buf2 = LPC_CANAF_RAM->mask[cnt1+2];
+	LPC_CANAF_RAM->mask[cnt1]=LPC_CANAF_RAM->mask[cnt1+1]= LPC_CANAF_RAM->mask[cnt1+2]=0x00;
+	cnt1+=3;
+	while(bound1--)
+	{
+		tmp0 = LPC_CANAF_RAM->mask[cnt1];
+		tmp1 = LPC_CANAF_RAM->mask[cnt1+1];
+		tmp2 = LPC_CANAF_RAM->mask[cnt1+2];
+		LPC_CANAF_RAM->mask[cnt1]= buf0;
+		LPC_CANAF_RAM->mask[cnt1+1]= buf1;
+		LPC_CANAF_RAM->mask[cnt1+2]= buf2;
+		buf0 = tmp0;
+		buf1 = tmp1;
+		buf2 = tmp2;
+		cnt1+=3;
+	}
+	CANAF_FullCAN_cnt++;
+	//update address values
+	LPC_CANAF->SFF_sa 	  +=0x04;
+	LPC_CANAF->SFF_GRP_sa +=0x04 ;
+	LPC_CANAF->EFF_sa     +=0x04 ;
+	LPC_CANAF->EFF_GRP_sa +=0x04;
+	LPC_CANAF->ENDofTable +=0x04;
+
+	LPC_CANAF->AFMR = 0x04;
+ 	return CAN_OK;
+}
+CAN_ERROR CAN_LoadGroupEntry(LPC_CAN_TypeDef* CANx, uint32_t lowerID, \
+		uint32_t upperID, CAN_ID_FORMAT_Type format)
+{
+	uint16_t tmp = 0;
+	uint32_t buf0, buf1, entry1, entry2, LID,UID;
+	int16_t cnt1, bound1, total;
+	//LPC_CANAF_RAM_TypeDef *AFLUTTest = LPC_CANAF_RAM;
+
+	if(lowerID > upperID) return CAN_CONFLICT_ID_ERROR;
+	if(CANx == LPC_CAN1)
+	{
+		tmp = 0;
+	}
+	else
+	{
+		tmp = 1;
+	}
+
+	total =((CANAF_FullCAN_cnt+1)>>1)+ CANAF_FullCAN_cnt*3 +((CANAF_std_cnt + 1) >> 1)+  \
+			CANAF_gstd_cnt + CANAF_ext_cnt + (CANAF_gext_cnt<<1);
+
+	/* Setup Acceptance Filter Configuration
+	Acceptance Filter Mode Register = Off */
+	LPC_CANAF->AFMR = 0x00000001;
+
+/*********Add Group of Standard Identifier Frame Format************/
+	if(format == STD_ID_FORMAT)
+	{
+		if ((total >= 512)){//don't have enough space
+			return CAN_OBJECTS_FULL_ERROR;
+		}
+		lowerID &=0x7FF; //mask ID
+		upperID &=0x7FF;
+		entry1  = (tmp << 29)|(lowerID << 16)|(tmp << 13)|(upperID << 0);
+		cnt1 = ((CANAF_FullCAN_cnt+1)>>1) + ((CANAF_std_cnt + 1) >> 1);
+
+		//if this is the first Group standard ID entry
+		if(CANAF_gstd_cnt == 0)
+		{
+			LPC_CANAF_RAM->mask[cnt1] = entry1;
+		}
+		else
+		{
+			//find the position to add new Group entry
+			bound1 = ((CANAF_FullCAN_cnt+1)>>1) + ((CANAF_std_cnt + 1) >> 1) + CANAF_gstd_cnt;
+			while(cnt1 < bound1)
+			{
+				//compare controller first
+				while((LPC_CANAF_RAM->mask[cnt1] >> 29)< (entry1 >> 29))//increase until meet greater or equal controller
+					cnt1++;
+				buf0 = LPC_CANAF_RAM->mask[cnt1];
+				if((LPC_CANAF_RAM->mask[cnt1] >> 29)> (entry1 >> 29)) //meet greater controller
+				{
+					//add at this position
+					LPC_CANAF_RAM->mask[cnt1] = entry1;
+					break;
+				}
+				else //meet equal controller
+				{
+					LID  = (buf0 >> 16)&0x7FF;
+					UID  = buf0 & 0x7FF;
+					if (upperID <= LID)
+					{
+					//add new entry before this entry
+					LPC_CANAF_RAM->mask[cnt1] = entry1;
+					break;
+				}
+				else if (lowerID >= UID)
+				{
+					//load next entry to compare
+					cnt1 ++;
+				}
+				else
+						return CAN_CONFLICT_ID_ERROR;
+				}
+			}
+			if(cnt1 >= bound1)
+			{
+				//add new entry at the last position in this list
+				buf0 = LPC_CANAF_RAM->mask[cnt1];
+				LPC_CANAF_RAM->mask[cnt1] = entry1;
+			}
+
+			//remove all remaining entry of this section one place up
+			bound1 = total - cnt1;
+			while(bound1--)
+			{
+				cnt1++;
+				buf1 = LPC_CANAF_RAM->mask[cnt1];
+				LPC_CANAF_RAM->mask[cnt1] = buf0;
+				buf0 = buf1;
+			}
+		}
+		CANAF_gstd_cnt++;
+		//update address values
+		LPC_CANAF->EFF_sa     +=0x04 ;
+		LPC_CANAF->EFF_GRP_sa +=0x04;
+		LPC_CANAF->ENDofTable +=0x04;
+	}
+
+
+/*********Add Group of Extended Identifier Frame Format************/
+	else
+	{
+		if ((total >= 511)){//don't have enough space
+			return CAN_OBJECTS_FULL_ERROR;
+		}
+		lowerID  &= 0x1FFFFFFF; //mask ID
+		upperID &= 0x1FFFFFFF;
+		entry1   = (tmp << 29)|(lowerID << 0);
+		entry2   = (tmp << 29)|(upperID << 0);
+
+		cnt1 = ((CANAF_FullCAN_cnt+1)>>1) + ((CANAF_std_cnt + 1) >> 1) + CANAF_gstd_cnt + CANAF_ext_cnt;
+		//if this is the first Group standard ID entry
+		if(CANAF_gext_cnt == 0)
+		{
+			LPC_CANAF_RAM->mask[cnt1] = entry1;
+			LPC_CANAF_RAM->mask[cnt1+1] = entry2;
+		}
+		else
+		{
+			//find the position to add new Group entry
+			bound1 = ((CANAF_FullCAN_cnt+1)>>1) + ((CANAF_std_cnt + 1) >> 1) + CANAF_gstd_cnt \
+						+ CANAF_ext_cnt + (CANAF_gext_cnt<<1);
+			while(cnt1 < bound1)
+			{
+				while((LPC_CANAF_RAM->mask[cnt1] >>29)< tmp) //increase until meet greater or equal controller
+					cnt1++;
+				buf0 = LPC_CANAF_RAM->mask[cnt1];
+				buf1 = LPC_CANAF_RAM->mask[cnt1+1];
+				if((LPC_CANAF_RAM->mask[cnt1] >> 29)> (entry1 >> 29)) //meet greater controller
+				{
+					//add at this position
+					LPC_CANAF_RAM->mask[cnt1] = entry1;
+					LPC_CANAF_RAM->mask[++cnt1] = entry2;
+					break;
+				}
+				else //meet equal controller
+				{
+					LID  = buf0 & 0x1FFFFFFF; //mask ID
+					UID  = buf1 & 0x1FFFFFFF;
+					if (upperID <= LID)
+					{
+						//add new entry before this entry
+						LPC_CANAF_RAM->mask[cnt1] = entry1;
+						LPC_CANAF_RAM->mask[++cnt1] = entry2;
+						break;
+					}
+					else if (lowerID >= UID)
+					{
+						//load next entry to compare
+						cnt1 +=2;
+					}
+					else
+						return CAN_CONFLICT_ID_ERROR;
+				}
+			}
+			if(cnt1 >= bound1)
+			{
+				//add new entry at the last position in this list
+				buf0 = LPC_CANAF_RAM->mask[cnt1];
+				buf1 = LPC_CANAF_RAM->mask[cnt1+1];
+				LPC_CANAF_RAM->mask[cnt1]   = entry1;
+				LPC_CANAF_RAM->mask[++cnt1] = entry2;
+			}
+			//remove all remaining entry of this section two place up
+			bound1 = total - cnt1 + 1;
+			cnt1++;
+			while(bound1>0)
+			{
+				entry1 = LPC_CANAF_RAM->mask[cnt1];
+				entry2 = LPC_CANAF_RAM->mask[cnt1+1];
+				LPC_CANAF_RAM->mask[cnt1]   = buf0;
+				LPC_CANAF_RAM->mask[cnt1+1] = buf1;
+				buf0 = entry1;
+				buf1 = entry2;
+				cnt1   +=2;
+				bound1 -=2;
+			}
+		}
+		CANAF_gext_cnt++;
+		//update address values
+		LPC_CANAF->ENDofTable +=0x08;
+	}
+
+	if(CANAF_FullCAN_cnt == 0) //not use FullCAN mode
+ 	{
+ 		LPC_CANAF->AFMR = 0x00;//not use FullCAN mode
+ 	}
+ 	else
+ 	{
+ 		LPC_CANAF->AFMR = 0x04;
+ 	}
+ 	return CAN_OK;
+}
+CAN_ERROR CAN_RemoveEntry(AFLUT_ENTRY_Type EntryType, uint16_t position)
+{
+	uint16_t cnt, bound, total;
+	uint32_t buf0, buf1;
+
+	/* Setup Acceptance Filter Configuration
+	Acceptance Filter Mode Register = Off */
+	LPC_CANAF->AFMR = 0x00000001;
+	total = ((CANAF_FullCAN_cnt+1)>>1)+((CANAF_std_cnt + 1) >> 1) + \
+			CANAF_gstd_cnt + CANAF_ext_cnt + (CANAF_gext_cnt<<1);
+
+
+/************** Remove FullCAN Entry *************/
+	if(EntryType == FULLCAN_ENTRY)
+	{
+		if((CANAF_FullCAN_cnt==0)||(position >= CANAF_FullCAN_cnt))
+		{
+			return CAN_ENTRY_NOT_EXIT_ERROR;
+		}
+		else
+		{
+			cnt = position >> 1;
+			buf0 = LPC_CANAF_RAM->mask[cnt];
+			bound = (CANAF_FullCAN_cnt - position -1)>>1;
+			if((position & 0x0001) == 0) //event position
+			{
+				while(bound--)
+				{
+					//remove all remaining FullCAN entry one place down
+					buf1  = LPC_CANAF_RAM->mask[cnt+1];
+					LPC_CANAF_RAM->mask[cnt] = (buf1 >> 16) | (buf0 << 16);
+					buf0  = buf1;
+					cnt++;
+				}
+			}
+			else //odd position
+			{
+				while(bound--)
+				{
+					//remove all remaining FullCAN entry one place down
+					buf1  = LPC_CANAF_RAM->mask[cnt+1];
+					LPC_CANAF_RAM->mask[cnt] = (buf0 & 0xFFFF0000)|(buf1 >> 16);
+					LPC_CANAF_RAM->mask[cnt+1] = LPC_CANAF_RAM->mask[cnt+1] << 16;
+					buf0  = buf1<<16;
+					cnt++;
+				}
+			}
+			if((CANAF_FullCAN_cnt & 0x0001) == 0)
+			{
+				if((position & 0x0001)==0)
+					LPC_CANAF_RAM->mask[cnt] = (buf0 << 16) | (0x0000FFFF);
+				else
+					LPC_CANAF_RAM->mask[cnt] = buf0 | 0x0000FFFF;
+			}
+			else
+			{
+				//remove all remaining section one place down
+				cnt = (CANAF_FullCAN_cnt + 1)>>1;
+				bound = total + CANAF_FullCAN_cnt * 3;
+				while(bound>cnt)
+				{
+					LPC_CANAF_RAM->mask[cnt-1] = LPC_CANAF_RAM->mask[cnt];
+					cnt++;
+				}
+				LPC_CANAF_RAM->mask[cnt-1]=0x00;
+				//update address values
+				LPC_CANAF->SFF_sa 	  -=0x04;
+				LPC_CANAF->SFF_GRP_sa -=0x04 ;
+				LPC_CANAF->EFF_sa     -=0x04 ;
+				LPC_CANAF->EFF_GRP_sa -=0x04;
+				LPC_CANAF->ENDofTable -=0x04;
+			}
+			CANAF_FullCAN_cnt--;
+
+			//delete its FullCAN Object in the FullCAN Object section
+			//remove all remaining FullCAN Object three place down
+			cnt = total + position * 3;
+			bound = (CANAF_FullCAN_cnt - position + 1) * 3;
+
+			while(bound)
+			{
+				LPC_CANAF_RAM->mask[cnt]=LPC_CANAF_RAM->mask[cnt+3];;
+				LPC_CANAF_RAM->mask[cnt+1]=LPC_CANAF_RAM->mask[cnt+4];
+				LPC_CANAF_RAM->mask[cnt+2]=LPC_CANAF_RAM->mask[cnt+5];
+				bound -=3;
+				cnt   +=3;
+			}
+		}
+	}
+
+/************** Remove Explicit Standard ID Entry *************/
+	else if(EntryType == EXPLICIT_STANDARD_ENTRY)
+	{
+		if((CANAF_std_cnt==0)||(position >= CANAF_std_cnt))
+		{
+			return CAN_ENTRY_NOT_EXIT_ERROR;
+		}
+		else
+		{
+			cnt = ((CANAF_FullCAN_cnt+1)>>1)+ (position >> 1);
+			buf0 = LPC_CANAF_RAM->mask[cnt];
+			bound = (CANAF_std_cnt - position - 1)>>1;
+			if((position & 0x0001) == 0) //event position
+			{
+				while(bound--)
+				{
+					//remove all remaining FullCAN entry one place down
+					buf1  = LPC_CANAF_RAM->mask[cnt+1];
+					LPC_CANAF_RAM->mask[cnt] = (buf1 >> 16) | (buf0 << 16);
+					buf0  = buf1;
+					cnt++;
+				}
+			}
+			else //odd position
+			{
+				while(bound--)
+				{
+					//remove all remaining FullCAN entry one place down
+					buf1  = LPC_CANAF_RAM->mask[cnt+1];
+					LPC_CANAF_RAM->mask[cnt] = (buf0 & 0xFFFF0000)|(buf1 >> 16);
+					LPC_CANAF_RAM->mask[cnt+1] = LPC_CANAF_RAM->mask[cnt+1] << 16;
+					buf0  = buf1<<16;
+					cnt++;
+				}
+			}
+			if((CANAF_std_cnt & 0x0001) == 0)
+			{
+				if((position & 0x0001)==0)
+					LPC_CANAF_RAM->mask[cnt] = (buf0 << 16) | (0x0000FFFF);
+				else
+					LPC_CANAF_RAM->mask[cnt] = buf0 | 0x0000FFFF;
+			}
+			else
+			{
+				//remove all remaining section one place down
+				cnt = ((CANAF_FullCAN_cnt + 1)>>1) + ((CANAF_std_cnt + 1) >> 1);
+				bound = total + CANAF_FullCAN_cnt * 3;
+				while(bound>cnt)
+				{
+					LPC_CANAF_RAM->mask[cnt-1] = LPC_CANAF_RAM->mask[cnt];
+					cnt++;
+				}
+				LPC_CANAF_RAM->mask[cnt-1]=0x00;
+				//update address value
+				LPC_CANAF->SFF_GRP_sa -=0x04 ;
+				LPC_CANAF->EFF_sa     -=0x04 ;
+				LPC_CANAF->EFF_GRP_sa -=0x04;
+				LPC_CANAF->ENDofTable -=0x04;
+			}
+			CANAF_std_cnt--;
+		}
+	}
+
+/************** Remove Group of Standard ID Entry *************/
+	else if(EntryType == GROUP_STANDARD_ENTRY)
+	{
+		if((CANAF_gstd_cnt==0)||(position >= CANAF_gstd_cnt))
+		{
+			return CAN_ENTRY_NOT_EXIT_ERROR;
+		}
+		else
+		{
+			cnt = ((CANAF_FullCAN_cnt + 1)>>1) + ((CANAF_std_cnt + 1) >> 1)+ position + 1;
+			bound = total + CANAF_FullCAN_cnt * 3;
+			while (cnt<bound)
+			{
+				LPC_CANAF_RAM->mask[cnt-1] = LPC_CANAF_RAM->mask[cnt];
+				cnt++;
+			}
+			LPC_CANAF_RAM->mask[cnt-1]=0x00;
+		}
+		CANAF_gstd_cnt--;
+		//update address value
+		LPC_CANAF->EFF_sa     -=0x04;
+		LPC_CANAF->EFF_GRP_sa -=0x04;
+		LPC_CANAF->ENDofTable -=0x04;
+	}
+
+/************** Remove Explicit Extended ID Entry *************/
+	else if(EntryType == EXPLICIT_EXTEND_ENTRY)
+	{
+		if((CANAF_ext_cnt==0)||(position >= CANAF_ext_cnt))
+		{
+			return CAN_ENTRY_NOT_EXIT_ERROR;
+		}
+		else
+		{
+			cnt = ((CANAF_FullCAN_cnt + 1)>>1) + ((CANAF_std_cnt + 1) >> 1)+ CANAF_gstd_cnt + position + 1;
+			bound = total + CANAF_FullCAN_cnt * 3;
+			while (cnt<bound)
+			{
+				LPC_CANAF_RAM->mask[cnt-1] = LPC_CANAF_RAM->mask[cnt];
+				cnt++;
+			}
+			LPC_CANAF_RAM->mask[cnt-1]=0x00;
+		}
+		CANAF_ext_cnt--;
+		LPC_CANAF->EFF_GRP_sa -=0x04;
+		LPC_CANAF->ENDofTable -=0x04;
+	}
+
+/************** Remove Group of Extended ID Entry *************/
+	else
+	{
+		if((CANAF_gext_cnt==0)||(position >= CANAF_gext_cnt))
+		{
+			return CAN_ENTRY_NOT_EXIT_ERROR;
+		}
+		else
+		{
+			cnt = total - (CANAF_gext_cnt<<1) + (position<<1);
+			bound = total + CANAF_FullCAN_cnt * 3;
+			while (cnt<bound)
+			{
+				//remove all remaining entry two place up
+				LPC_CANAF_RAM->mask[cnt] = LPC_CANAF_RAM->mask[cnt+2];
+				LPC_CANAF_RAM->mask[cnt+1] = LPC_CANAF_RAM->mask[cnt+3];
+				cnt+=2;
+			}
+		}
+		CANAF_gext_cnt--;
+		LPC_CANAF->ENDofTable -=0x08;
+	}
+
+	if(CANAF_FullCAN_cnt == 0) //not use FullCAN mode
+ 	{
+ 		LPC_CANAF->AFMR = 0x00;//not use FullCAN mode
+ 	}
+ 	else
+ 	{
+ 		LPC_CANAF->AFMR = 0x04;
+ 	}
+	return CAN_OK;
+}
+
+/*******************  (C) COPYRIGHT 2011 DJI ************END OF FILE***********/

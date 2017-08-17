@@ -1,0 +1,13 @@
+#ifndef __LPC17XX_TIMER_H
+#define __LPC17XX_TIMER_H
+
+#include "lpc17xx.h"
+
+void TIMER0_Init( void );
+void TIMER0_Start( void );
+void TIMER0_Stop( void );
+void TIMER0_Reset( void );
+
+uint8_t TIMER0_10Ms_Timeout( void );
+
+#endif

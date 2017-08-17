@@ -1,0 +1,9 @@
+.\output\user_pwm.o: drivers\user_pwm.c
+.\output\user_pwm.o: drivers\LPC17xx.h
+.\output\user_pwm.o: .\cstartup\core_cm3.h
+.\output\user_pwm.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
+.\output\user_pwm.o: .\cstartup\system_LPC17xx.h
+.\output\user_pwm.o: .\drivers\uart\LPC17xx_uart.h
+.\output\user_pwm.o: drivers\user_pwm.h
+.\output\user_pwm.o: .\cstartup\LPC17xx.h
+.\output\user_pwm.o: .\app\cfg\cfg_handler.h

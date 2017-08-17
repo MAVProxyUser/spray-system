@@ -1,0 +1,553 @@
+/**
+  ******************** (C) COPYRIGHT 2012 DJI **********************************
+  *
+  * @Project Name       : BL_WKM2_LED_IAP.uvproj
+  * @File Name          : cfg_handler.h
+  * @Environment        : keil mdk4.12/LPC1765/100M cclock
+  * @Author&Date        : 2012-05-28 
+  * @Version            : 1.00
+  ******************************************************************************
+  * @Description
+  *	    Begginning of application   
+  */
+#ifndef __CFG_HANDLER_H__
+#define __CFG_HANDLER_H__
+
+enum {
+    EP_NULL,
+#if __USB_ENABLE__
+    EP_USB,
+#endif
+#if __CAN1_ENABLE__
+    EP_CAN1,
+    EP_CAN1_LED,
+		EP_CAN1_LB,
+#endif
+#if __CAN2_ENABLE__
+    EP_CAN2,
+#endif
+#if __UART0_ENABLE__
+    EP_UART0,
+#endif
+#if __UART1_ENABLE__
+    EP_UART1,
+#endif
+#if __UART2_ENABLE__
+    EP_UART2,
+#endif
+#if __UART3_ENABLE__
+    EP_UART3,
+#endif
+};
+
+#define	DJI_PRO_DEVICE_TYPE_CAMERA	        1
+#define	DJI_PRO_DEVICE_TYPE_APP	            2
+#define	DJI_PRO_DEVICE_TYPE_FLIGHT_CONTROL	3
+#define	DJI_PRO_DEVICE_TYPE_GIMBAL	        4
+#define	DJI_PRO_DEVICE_TYPE_CENTER	        5
+#define	DJI_PRO_DEVICE_TYPE_REMOTE_CONTROL	6
+#define	DJI_PRO_DEVICE_TYPE_STA_WIFI	        7
+#define	DJI_PRO_DEVICE_TYPE_AB_DM368	    8
+#define	DJI_PRO_DEVICE_TYPE_AB_OFDM	        9
+#define	DJI_PRO_DEVICE_TYPE_PC	            10
+#define	DJI_PRO_DEVICE_TYPE_SMART_BATTERY	11
+#define	DJI_PRO_DEVICE_TYPE_ESC		        12
+#define	DJI_PRO_DEVICE_TYPE_GS_DM368		13
+#define	DJI_PRO_DEVICE_TYPE_GS_OFDM		    14
+#define	DJI_PRO_DEVICE_TYPE_AB_68013		15
+#define	DJI_PRO_DEVICE_TYPE_GS_68013		16
+#define	DJI_PRO_DEVICE_TYPE_MONOCULAR_VISION	17
+#define	DJI_PRO_DEVICE_TYPE_BINOCULAR_VISION	18
+#define DJI_PRO_DEVICE_TYPE_GS_FPGA         20
+#define DJI_PRO_DEVICE_TYPE_AP_WIFI    27
+#define	DJI_PRO_DEVICE_TYPE_1765_TEST		29
+#define	DJI_PRO_DEVICE_TYPE_BROADCAST		31
+#define	CRC_16_LENGTH	2
+
+typedef __packed struct {
+	uint8_t sof;
+	__packed struct {
+		uint16_t length		    : 10;
+		uint16_t version 	    : 6;
+	} vl;
+	uint8_t crc8;
+	uint16_t id;
+} cmd_header_v0_t;
+
+typedef __packed struct {
+	uint8_t sof;
+	__packed struct {
+		uint16_t length		    : 10;
+		uint16_t version 	    : 6;
+	} vl;
+	uint8_t crc8;
+	__packed struct {
+		uint8_t sender_id		: 5;
+		uint8_t sender_index	: 3;
+	} sender;
+	__packed struct {
+		uint8_t receiver_id		: 5;
+		uint8_t receiver_index	: 3;
+	} receiver;
+	uint16_t seqnum;
+	__packed struct {
+		uint8_t	encrypt_type	: 4;
+		uint8_t reserve			: 1;
+		uint8_t cmd_ack			: 2;
+		uint8_t cmd_type		: 1;
+	} type;
+	uint8_t set;
+	uint8_t id;
+} cmd_header_v1_t;
+
+typedef __packed struct {
+	uint8_t result;
+	__packed struct {
+		uint8_t minor	: 4;
+		uint8_t major : 4;
+	} command_version;
+	uint8_t hardware_ver[16];
+    uint32_t loader_ver;
+    uint32_t firmware_ver;
+	uint32_t command_set;
+} cmd_device_info_ack_t;
+
+typedef __packed struct {
+	uint8_t encrypt;
+	uint8_t reserve[8];
+} cmd_entry_upgrade_req_t;
+
+typedef __packed struct {
+	uint8_t result;
+} cmd_entry_upgrade_ack_t;
+
+typedef __packed struct {
+	uint8_t encrypt;
+	uint32_t firmware_size;
+	uint8_t reserve[8];
+} cmd_start_upgrade_req_t;
+
+typedef __packed struct {
+	uint8_t result;
+	uint16_t data_size;
+} cmd_start_upgrade_ack_t;
+
+typedef __packed struct {
+	uint8_t encrypt;
+	int32_t package_index;
+	uint16_t package_length;
+	uint8_t data[1000];
+} cmd_data_upgrade_req_t;
+
+typedef __packed struct {
+	uint8_t result;
+	uint32_t package_index;
+} cmd_data_upgrade_ack_t;
+
+typedef __packed struct {
+	uint8_t encrypt;
+	uint8_t md5[16];
+} cmd_end_upgrade_req_t;
+
+typedef __packed struct {
+	uint8_t result;
+} cmd_end_upgrade_ack_t;
+
+typedef __packed struct {
+	uint8_t encrypt;
+    uint8_t type;
+	uint32_t delay_ms;
+	uint8_t reserve[8];
+} cmd_reboot_req_t;
+
+typedef __packed struct {
+	uint8_t result;
+} cmd_reboot_ack_t;
+
+typedef __packed struct {
+	__packed struct {
+		uint8_t minor : 4;
+		uint8_t major : 4;
+	} ver;
+} cmd_status_report_req_t;
+
+typedef __packed struct {
+	uint8_t result;
+	__packed struct {
+		uint8_t minor : 4;
+		uint8_t major : 4;
+	} ver;
+	uint32_t status;
+} cmd_status_report_ack_t;
+
+typedef __packed struct {
+	__packed struct {
+		uint8_t minor : 4;
+		uint8_t major : 4;
+	} ver;
+    uint8_t hardware_ver[16];
+} cmd_set_version_req_t;
+
+typedef __packed struct {
+	uint8_t result;
+	__packed struct {
+		uint8_t minor : 4;
+		uint8_t major : 4;
+	} ver;
+	uint8_t hardware_ver[16];
+} cmd_set_version_ack_t;
+
+typedef __packed struct {
+  uint8_t cmdtype ;
+	uint8_t value;
+} cmd_camera_remote_req_t;
+
+typedef __packed struct {
+  uint8_t reserved:7;
+	uint8_t health_flag:1;
+} pump_esc_status_t;
+
+typedef __packed struct {
+  uint8_t pump2_state:4;
+	uint8_t pump1_state:4;
+} pump_presure_state_t;
+
+typedef __packed struct {
+  uint8_t cur_flow:6;
+	uint8_t cali_result:2; // 0:正常态 1 ：标定成功 2：标定失败
+} pump_flow_state_t;
+
+
+typedef __packed struct {
+  uint8_t enable_flag:1;
+	uint8_t flow_speed: 7;// 单位：0.02L/min
+	uint8_t valid_spray;
+} spray_sys_esc_status_t;
+
+typedef __packed struct {
+  uint8_t enable_flag:1;
+	uint8_t flow_speed: 7;// 单位：0.02L/min
+} esc_status_t;
+
+
+//typedef __packed struct {
+//	uint8_t flow_speed: 7;// 单位：0.02L/min
+//	uint8_t enable_flag:1;
+//} debug_esc_status_t;
+
+typedef __packed struct {
+	pump_esc_status_t pump_esc_status[6]; // 水泵电调状态 （预留4个）
+	pump_flow_state_t flow_para[2]; // 0.1L/min
+	pump_presure_state_t pump_presure_state; // 水泵压力状态
+	uint8_t remaining_capacity;//L 剩余容量
+	__packed struct{
+		uint8_t XT100:4;
+		uint8_t XT90:4;
+	} plug_temp_level;
+//	debug_esc_status_t debug_esc_status[2]; //esc_status_t
+//	uint16_t debug_pump1_foc_value;
+//	uint16_t debug_pump1_press_value;
+//	uint16_t debug_pump2_foc_value;
+//	uint16_t debug_pump2_press_value;
+//	uint8_t  debug_flow_freq;
+//	uint8_t  level_status;
+	uint8_t count; // 推送包计数
+} cmd_spary_sys_status_push_t;
+
+
+
+typedef __packed struct {
+	esc_status_t spray_cmd[6];
+	uint8_t valid_spray; //表示飞机起飞后的作业喷洒
+	uint8_t reserved;
+}cmd_spary_sys_esc_ctrl_t;
+
+
+typedef __packed struct {
+	uint8_t cali_capacity; // 流量计标定单位：L
+}cmd_flow_cali_t;
+
+typedef __packed struct { // 流量计请求应答结构体
+	uint8_t ack_code; // 应答码为0
+}cmd_flow_cali_ack_t;
+
+typedef __packed struct { // 流量计标定结果推送
+	uint8_t result; // 0：表示标定成功 1：表示标定失败
+}cmd_flow_cali_completed_t;
+
+typedef __packed struct {
+	uint8_t level_status; // 得到液位开关数值
+}cmd_level_switch_t;
+
+typedef __packed struct {
+  uint8_t waring_mode:7;
+	uint8_t read_or_write:1;
+}cmd_residual_volume_t;
+
+typedef __packed struct {
+  uint8_t ack_code;
+  uint8_t ack_waring_mode;
+}cmd_residual_volume_ack_t;
+
+typedef __packed struct {
+  uint8_t flowmeter_value:7;
+	uint8_t read_or_write:1;
+}cmd_flowmeter_K_control_t;
+
+typedef __packed struct {
+  uint8_t ack_code;
+  uint8_t ack_flowmeter_value;
+}cmd_flowmeter_ack_t;
+
+//typedef __packed struct {
+//  uint8_t  default_capacity;
+//	uint8_t  dosage_mu;
+//	uint16_t complted_mu;
+//	uint16_t plan_flow;
+//}cmd_spray_results_t;
+
+typedef __packed struct {
+  uint8_t ack_code;
+}cmd_spray_results_ack_t;
+
+
+
+typedef __packed struct {
+	float vlx;
+	float vly;
+}speed_xy_t;
+
+typedef __packed struct {
+	__packed struct {
+		uint8_t foc_encoder : 6;
+		uint8_t cmd:2;
+	} cmd;
+	__packed struct {
+		uint8_t feckbackID: 5;
+		uint8_t youmen_type:3;
+	} type;
+	__packed struct {
+		uint16_t acc_value:14;
+		uint16_t led_g:1;
+		uint16_t led_r:1;
+	} foc0;
+		__packed struct {
+		uint16_t acc_value:14;
+		uint16_t led_g:1;
+		uint16_t led_r:1;
+	} foc1;
+		__packed struct {
+		uint16_t acc_value:14;
+		uint16_t led_g:1;
+		uint16_t led_r:1;
+	} foc2;
+		__packed struct {
+		uint16_t acc_value:14;
+		uint16_t led_g:1;
+		uint16_t led_r:1;
+	} foc3;
+	
+} cmd_foc_req_t;
+
+
+typedef __packed struct {
+	uint8_t  ID;
+	uint8_t  statu;
+	int16_t  line_U;
+	int16_t  foc_I;
+	int16_t  temperature;
+	int16_t  speed;
+  int16_t  acc_signal;
+	int16_t  out_U;
+	uint8_t  resever[6];
+}cmd_foc_ack_t ;
+extern cmd_foc_ack_t g_stFOC_Value[] ;
+
+typedef __packed struct {
+  uint16_t distance;
+	uint8_t  flag;
+  uint8_t  cnt;  
+}cmd_radar_push_t ;
+
+typedef __packed struct {
+	cmd_radar_push_t radar_data;
+	uint8_t          data_flash;
+}radar_data_t;
+
+typedef void ( *ptr_func_handler )( uint8_t *p_buf, uint16_t len );
+
+typedef struct {
+	ptr_func_handler 	handler;	
+	uint16_t      		id;
+} handler_pair_v0_t;
+
+typedef struct {
+	ptr_func_handler 	handler;	
+	uint8_t   	   		id;
+	uint8_t 		    set;
+} handler_pair_v1_t;
+
+/******数据记录仪相关***********/
+
+typedef __packed struct {
+	uint8_t enable_flag;
+	float   flow_speed;// 单位：0.02L/min
+} control_pump_status_t;
+
+typedef __packed struct
+{
+	control_pump_status_t control_pump_status[2];
+	uint16_t foc1_value;
+	uint16_t press1_value;
+	uint16_t foc2_value;
+	uint16_t press2_value;
+	uint8_t  flow_freq;
+	uint8_t  level_status;
+	uint16_t cali_capacity;
+	uint16_t cali_pulses;
+} spray_system_para_save_iosd_t;
+
+// block id 申请
+#define MY_DEVICE_TAG 1
+typedef __packed struct
+{
+  uint8_t tag;
+} cmd_iosd_req_t;
+
+typedef __packed struct
+{
+	uint8_t ack_code;
+	uint8_t result;
+	uint16_t Block_ID;
+  uint8_t tag;
+} cmd_iosd_ack_t;
+
+// 状态查询
+typedef __packed struct
+{
+  uint8_t reserve;
+} cmd_iosd_status_inquire_t;
+
+typedef __packed struct
+{
+  uint8_t ack_code;
+	uint8_t status_flag;
+} cmd_iosd_status_ack_t;
+
+// 配置包推送
+#define data_name_length 92// < 240 个字节，协议规定
+typedef __packed struct
+{
+  uint16_t block_id;
+	uint8_t  number_of_packet_entries;
+	uint8_t  config_data_length;
+	uint8_t  data_name[data_name_length];// 配置数据
+} cmd_iosd_config_t;
+
+typedef __packed struct
+{
+  uint8_t ack_code;
+	uint8_t config_result;
+	uint16_t block_id;
+} cmd_iosd_config_ack_t;
+
+//数据包推送
+typedef __packed struct
+{
+  uint16_t block_id;
+	uint8_t  iosd_data_length;
+  spray_system_para_save_iosd_t spray_system_para;//uint8_t  ; 数据区
+} cmd_iosd_data_push_t;
+
+typedef __packed struct
+{
+  uint8_t ack_code;
+	uint8_t iosd_save_result;
+	uint16_t block_id;
+} cmd_iosd_data_push_ack_t;
+
+#define DEVICE_ID             (28)
+#define DEVICE_INDEX	        (0)
+#define DEVICE_LOADER_VERSION   (0x02000000)
+
+#define FOC_1   1 // 串口1控制  
+#define FOC_2   2 // 串口3控制
+
+#define  CMD_SET_ADDR  1
+#define  CMD_NO_ORDER  0
+
+#define Throttle_Value_Type 0 //  范围1000-2000
+#define Rotating_Speed_Type 1
+#define Voltage 2
+
+
+#define Pump_Wroking 1      
+#define Pump_Stop    0  
+#define Pump_Presure_Normal   0
+#define Pump_One_Pipe_Block   1
+#define Pump_Two_Pipe_Block   2
+
+#define ESC_Normal  0
+#define ESC_Fault   1
+
+#define STOP_SPARY  0
+#define START_SPARY   1
+
+#define No_Liquid      0 // 水箱剩余少量液体停喷
+#define Small_Liquid   1 // 水箱无药停喷
+
+#define Single_Pump 1
+#define Double_Pump 2
+
+#define CANCEL_FLOW_CALI      0
+#define START_FLOW_CALI       1
+#define CLEAR_FLOW_CALI_PARA  2
+
+extern int32_t g_cfg_end_point;
+uint8_t get_command_version( uint8_t *p_buf, uint8_t len );
+void command_process_v0( uint8_t *p_buf, uint16_t len );
+void command_process_v1( uint8_t *p_buf, uint16_t len );
+
+void cfg_status_report( void );
+void cmd_hander_foc_request( uint8_t cmd , uint8_t foc_id );
+void PC_LOG( uint8_t num , const uint8_t *pstr, ... );
+void can_upgrade_ack( uint8_t * buf , uint16_t len );
+void cmd_handler_foc_ver_request( uint8_t idx );
+void spary_sys_status_push( void );
+extern radar_data_t g_stRadarData;
+extern spray_sys_esc_status_t FOC_1_STATUS;
+extern spray_sys_esc_status_t FOC_2_STATUS;
+void set_foc_throttle_value(uint8_t foc_id,spray_sys_esc_status_t  foc_status);
+uint16_t get_foc_throttle_value(uint8_t foc_id);
+void cmd_handler_flow_cali(  uint8_t *p_buf, uint16_t len);
+void  Set_Throttle_Value_1(uint16_t value);
+void  Set_Throttle_Value_2(uint16_t value);
+uint8_t get_pwm_present_value(void);
+uint8_t get_cali_capacity(void);
+//void flow_cali_result_push( uint8_t cali_result);
+void SET_FOC1_MUTEX_FLAG(uint8_t state);
+void SET_FOC2_MUTEX_FLAG(uint8_t state);
+uint8_t get_level_status_by_radar(void);
+void cmd_handler_level_switch( uint8_t *p_buf, uint16_t len);
+void cmd_handler_residual_volume_warning(uint8_t *p_buf, uint16_t len);
+void set_flow_cali_result(uint8_t value);
+extern void Set_Foc_Value_By_Flow_Double_Pump(spray_sys_esc_status_t foc_status );//单位为 0.02L/min
+extern void Set_Foc_Value_By_Flow_Single_Pump(uint8_t foc_id,spray_sys_esc_status_t foc_status );
+void set_residual_volume_warning_mode(uint8_t mode);//默认是剩药
+//void cmd_handler_spray_results_corrected(uint8_t *p_buf, uint16_t len); 
+extern uint8_t get_pump1_state(void);
+extern uint8_t get_pump2_state(void);
+
+void cmd_handler_Block_ID_ack(uint8_t *p_buf, uint16_t len) ;
+void cmd_handler_iosd_status_ack(uint8_t *p_buf, uint16_t len);
+void cmd_handler_iosd_config_ack(uint8_t *p_buf, uint16_t len);
+void cmd_handler_data_push_ack(uint8_t *p_buf, uint16_t len);
+void cmd_handler_flowmeter_K_control(uint8_t *p_buf, uint16_t len);
+void IOSD_Block_ID_Request(void);
+void IOSD_status_inquire(void);
+void IOSD_Config_Info_Push(void);
+void spray_system_data_Push(void);
+void spray_system_para_recoder(void);
+/*******************  (C) COPYRIGHT 2012 DJI ************END OF FILE***********/
+#endif
+

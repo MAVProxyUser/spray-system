@@ -1,0 +1,102 @@
+/**
+  ******************** (C) COPYRIGHT 2011 DJI **********************************
+  *
+  * @Project Name       : BL_WKM2_MAIN.uvproj
+  * @File Name          : cfg_unpack.c
+  * @Environment        : keil mdk4.12/LPC1765/100M cclock
+  * @Author&Date        : 2012-05-28 
+  * @Version            : 1.00
+  ******************************************************************************
+  * @Description
+  *	    Begginning of application   
+  */
+#include <string.h>
+#include "../../cstartup/type.h"
+#include "../../drivers/drivers.h"
+#include "../../can/can_inc.h"
+#include "../../usb/vcom_app.h"
+#include "cfg_inc.h"
+#include "../crc/MF_CRC8.h"
+#include "../crc/MF_CRC16.h"
+
+/* 带CRC校验的数据包 解包 */
+void cfg_unpack_tick( void )        
+{
+	static uint8_t cfg_unpack_step = 0;
+	static uint16_t cfg_unpack_idx = 0;
+	static uint16_t cfg_unpack_len = 0;
+	static uint8_t cfg_unpack_buf[CFG_CMD_MAX_SIZE];
+	
+	uint32_t cnt  = 0;
+	uint8_t byte = 0, version = 0;
+#ifdef __CAN__
+	cnt = CAN_RING_BUF_COUNT( &upgradeRxRingBuf );
+#endif
+#ifdef __USB__
+	cnt = OutBufAvailBytes();
+#endif
+	while( cnt-- ) {
+	#ifdef __CAN__
+		byte = CAN_RING_BUF_RD( &upgradeRxRingBuf );
+	#endif
+	#ifdef __USB__
+		byte = VCOM_GetByte();
+	#endif	
+//		uart_printf( 0, "%.2x ", byte );
+		switch( cfg_unpack_step ) {
+			case 0:
+				if( byte == 0x55 ) {
+					cfg_unpack_idx = 0;
+					cfg_unpack_buf[cfg_unpack_idx++] = byte;
+					cfg_unpack_step = 1;
+				}
+				break;
+			case 1:
+				cfg_unpack_len = byte;
+				cfg_unpack_buf[cfg_unpack_idx++] = byte;
+				cfg_unpack_step = 2;
+				break;
+			case 2:
+				cfg_unpack_len |= ( ( byte & 0x3 ) << 8 );
+				if( cfg_unpack_len > CFG_CMD_MAX_SIZE ) {
+					cfg_unpack_step = 0;
+				} else {
+					cfg_unpack_buf[cfg_unpack_idx++] = byte;
+					cfg_unpack_step = 3;
+				}
+				break;
+			case 3:
+				cfg_unpack_buf[cfg_unpack_idx++] = byte;
+				if( Verify_CRC8_Check_Sum( cfg_unpack_buf, 4 ) ) {
+					cfg_unpack_step = 4;
+				} else {
+					cfg_unpack_step = 0;
+				}
+				break;
+			case 4:
+				if( cfg_unpack_idx < cfg_unpack_len ) {
+					cfg_unpack_buf[cfg_unpack_idx++] = byte;
+				}
+				if( cfg_unpack_idx == cfg_unpack_len ) {
+					cfg_unpack_step = 0;
+					if( Verify_CRC16_Check_Sum( cfg_unpack_buf, cfg_unpack_len ) ) {
+						version = get_command_version( cfg_unpack_buf, cfg_unpack_len );
+						if( version == 0 ) {
+							command_process_v0( cfg_unpack_buf, cfg_unpack_len );
+						} else if( version == 1 ) {
+							command_process_v1( cfg_unpack_buf, cfg_unpack_len );
+						} else {
+							uart_printf( 0, "[%s, %d] unkown version!\r\n", __FILE__, __LINE__ );
+						}
+					} else {
+						uart_printf( 0, "[%s, %d] crc16 error!\r\n", __FILE__, __LINE__ );
+					}
+				}
+				break;
+			default:
+				cfg_unpack_step = 0;
+		}
+	}
+}
+
+/*******************  (C) COPYRIGHT 2012 DJI ************END OF FILE***********/

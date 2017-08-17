@@ -1,0 +1,64 @@
+/**
+  ******************** (C) COPYRIGHT 2011 DJI **********************************
+  *
+  * @Project Name       : WKM2_CAN_LOADER.uvproj
+  * @File Name          : can_unpack.h
+  * @Environment        : keil mdk4.12/LPC1765/100M cclock
+  * @Author&Date        : 2011-10-18
+  * @Version            : 1.10
+  ******************************************************************************
+  * @Description
+  *
+  */
+
+/* Define to prevent recursive inclusion -------------------------------------*/
+#ifndef __CAN_UNPACK_H__
+#define __CAN_UNPACK_H__
+
+/* public function declaration -----------------------------------------------*/
+#pragma pack(1)
+typedef struct
+{
+	uint16_t body_length;
+	uint8_t  protocol_version;
+	uint16_t sequence_number;
+	uint16_t cmd_id;
+	uint16_t flag;
+	uint8_t  encryp_type;
+}GS_HEADER_t;
+
+/*  __packed 和 #pragma pack(1)有着不同的含义
+ *	#pragma pack(1)表示结构在内存中存储时,成员之间没有空洞,是紧密的
+ *  __packed表示读该变量时,按照实际地址去寻址变量,而不是将奇数地址（或者是地址不是自然边界的整数倍时）
+ * 舍弃余数位后再寻址
+ */
+
+
+#pragma pack()
+
+/* slave ack cmd or send pack typedef ------------------------------------------------------------*/
+#pragma pack(1)
+
+
+/* 姿态数据结构 */
+
+
+#pragma pack()
+
+
+#if UNPACK_ON_ISR > 0
+void CAN_rx_int_unpack_ctrl(void);
+#else
+void CAN_rx_task_unpack_ctrl(void);
+void CAN_rx_task_unpack_gimbal(void);
+#endif
+
+
+
+/* public define -------------------------------------------------------------*/
+
+
+
+/*******************  (C) COPYRIGHT 2013 DJI ************END OF FILE***********/
+
+#endif

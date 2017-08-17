@@ -1,0 +1,159 @@
+
+#include "LPC17xx.h"
+#include "drivers.h"
+#include "../app/cfg/cfg_handler.h"
+//GPIO0 和 GPIO2都可以作为外部中断，但是中断入口只有一个EINT3
+//INPUT1 p2.6  INPUT2  P2.7
+
+#define BIT7_MASK  0x0000080
+#define BIT6_MASK  0x0000040
+
+void Interrupt_Init( void )
+{
+	//设置为输入状态
+	LPC_GPIO2->FIODIR &= (~(1<<7))|(~(1<<6));;
+	LPC_GPIOINT->IO2IntEnR |=BIT7_MASK | BIT6_MASK; // 使能上升沿中断
+//LPC_GPIOINT->IO2IntEnF |=BIT7_MASK ;
+	LPC_GPIOINT->IO2IntClr|=BIT7_MASK|BIT6_MASK ;
+	NVIC_SetPriority( EINT3_IRQn , 0 );
+	NVIC_EnableIRQ(EINT3_IRQn);
+}
+
+
+int32_t idx_7,idx_6;
+int32_t idx_6_total,idx_7_total;
+int16_t idx_7_freq,idx_6_freq;
+uint8_t flow_cali_flag = 0;
+extern uint32_t flow1_sensor_tick,flow2_sensor_tick;
+void flow_cali_enble(void)
+{
+	flow_cali_flag = START_FLOW_CALI;
+}
+
+void flow_cali_clear(void)
+{
+  flow_cali_flag = CLEAR_FLOW_CALI_PARA;
+}
+
+
+uint32_t get_cali_flow1_pulses(void)
+{
+	return idx_7_total;
+}
+uint32_t get_cail_flow1_time(void)
+{
+ return flow1_sensor_tick;
+}
+
+uint32_t get_cali_flow2_pulses(void)
+{
+	return idx_6_total;
+}
+uint32_t get_cail_flow2_time(void)
+{
+	return flow2_sensor_tick;
+}
+
+
+
+void EINT3_IRQHandler(void)
+{
+	//上升沿  ,结束测量
+	if( LPC_GPIOINT->IO2IntStatR & BIT7_MASK )
+	{
+		idx_7++;
+		if(flow_cali_flag == START_FLOW_CALI)
+		{
+		    idx_7_total++;// 这些参数是在喷洒使能的情况下,当喷洒停止时，停止脉冲数的计数（这时为惯性）
+			
+			if(idx_7_total == 1) //第一次时开始计时
+				flow1_sensor_tick = 0;
+		}
+		else if(flow_cali_flag == CANCEL_FLOW_CALI)
+		{
+		  idx_7_total = 0;
+		}
+
+		LPC_GPIOINT->IO2IntClr |= BIT7_MASK ;
+	}
+	
+	if( LPC_GPIOINT->IO2IntStatR & BIT6_MASK )
+	{
+		idx_6++;
+		if(flow_cali_flag == START_FLOW_CALI)
+		{
+		    idx_6_total++;// 这些参数是在喷洒使能的情况下,当喷洒停止时，停止脉冲数的计数（这时为惯性）
+			
+			if(idx_6_total == 1) //第一次时开始计时
+				flow2_sensor_tick = 0;
+		}
+		else if(flow_cali_flag == CANCEL_FLOW_CALI)
+		{
+		  idx_6_total = 0;
+		}
+		LPC_GPIOINT->IO2IntClr |= BIT6_MASK ;
+	}
+}
+
+// 标定程序专用
+//void EINT3_IRQHandler(void)
+//{
+//	//上升沿  ,结束测量
+//	if( LPC_GPIOINT->IO2IntStatR & BIT7_MASK )
+//	{		
+//    idx_7++;
+//		LPC_GPIOINT->IO2IntClr |= BIT7_MASK ;
+//	}
+//	
+//	if( LPC_GPIOINT->IO2IntStatR & BIT6_MASK )
+//	{
+//		idx_6++;
+//		if(flow_cali_flag == 1)
+//		{
+//		  idx_6_total++;
+//			if(idx_6_total == 1) //第一次时开始计时
+//				flow_sensor_tick = 0;
+//		}
+//		else if(flow_cali_flag == 2)
+//		{
+//		  idx_6_total = 0;
+//		}
+//		LPC_GPIOINT->IO2IntClr |= BIT6_MASK ;
+//	}
+//}
+//float Sonar_time ;
+//uint16_t g_Distance ;
+//uint32_t g_SonarGetTime=0;
+//int32_t idx_7,idx_6;
+//int16_t idx_7_freq,idx_6_freq;
+//void EINT3_IRQHandler(void)
+//{
+//	//上升沿  ,结束测量
+//	if( LPC_GPIOINT->IO2IntStatR & BIT7_MASK )
+//	{
+//    idx_7++;
+//		LPC_GPIOINT->IO2IntClr |= BIT7_MASK ;
+//	}
+//	
+//	if( LPC_GPIOINT->IO2IntStatR & BIT6_MASK )
+//	{
+//    idx_6++;
+//		LPC_GPIOINT->IO2IntClr |= BIT6_MASK ;
+//	}
+//}
+
+//	//下降沿  开始 因为反向了
+//	if( LPC_GPIOINT->IO2IntStatF & BIT7_MASK ){
+//		TIMER2_START ;
+//		LPC_GPIOINT->IO2IntClr |= BIT7_MASK ;
+//	}
+//extern void sonar_push( uint16_t distance );
+//uint32_t g_u32PluseCnt1;
+//uint32_t g_u32PluseCnt2;
+//uint32_t g_Sonar ;
+
+//struct Sonar{
+//	uint16_t value ;
+//	uint8_t  flag  ;
+//} DistanceFormer[4];
+

@@ -1,0 +1,175 @@
+/**
+  ******************** (C) COPYRIGHT 2012 DJI **********************************
+  *
+  * @Project Name       : BL_WKM2_LED_IAP.uvproj
+  * @File Name          : cfg_handler.h
+  * @Environment        : keil mdk4.12/LPC1765/100M cclock
+  * @Author&Date        : 2012-05-28 
+  * @Version            : 1.00
+  ******************************************************************************
+  * @Description
+  *	    Begginning of application   
+  */
+#ifndef __CFG_HANDLER_H__
+#define __CFG_HANDLER_H__
+
+typedef __packed struct {
+	uint8_t sof;
+	__packed struct {
+		uint16_t length		: 10;
+		uint16_t version 	: 6;
+	} vl;
+	uint8_t crc8;
+	uint16_t id;
+} cmd_header_v0_t;
+
+typedef __packed struct {
+	uint8_t sof;
+	__packed struct {
+		uint16_t length		: 10;
+		uint16_t version 	: 6;
+	} vl;
+	uint8_t crc8;
+	__packed struct {
+		uint8_t sender_id			: 5;
+		uint8_t sender_index	: 3;
+	} sender;
+	__packed struct {
+		uint8_t receiver_id			: 5;
+		uint8_t receiver_index	: 3;
+	} receiver;
+	uint16_t seqnum;
+	__packed struct {
+		uint8_t	encrypt_type	: 4;
+		uint8_t reserve				:	2;
+		uint8_t cmd_ack				: 1;
+		uint8_t cmd_type			: 1;
+	} type;
+	uint8_t set;
+	uint8_t id;
+} cmd_header_v1_t;
+
+typedef __packed struct {
+	uint8_t result;
+	__packed struct {
+		uint8_t minor	: 4;
+		uint8_t major : 4;
+	} command_version;
+	uint8_t hardware_ver[16];
+    uint32_t loader_ver;
+    uint32_t firmware_ver;
+	uint32_t command_set;
+} cmd_device_info_ack_t;
+
+typedef __packed struct {
+	uint8_t encrypt;
+	uint8_t reserve[8];
+} cmd_entry_upgrade_req_t;
+
+typedef __packed struct {
+	uint8_t result;
+} cmd_entry_upgrade_ack_t;
+
+typedef __packed struct {
+	uint8_t encrypt;
+	uint32_t firmware_size;
+	uint8_t reserve[8];
+} cmd_start_upgrade_req_t;
+
+typedef __packed struct {
+	uint8_t result;
+	uint16_t data_size;
+} cmd_start_upgrade_ack_t;
+
+typedef __packed struct {
+	uint8_t encrypt;
+	int32_t package_index;
+	uint16_t package_length;
+	uint8_t data[1000];
+} cmd_data_upgrade_req_t;
+
+typedef __packed struct {
+	uint8_t result;
+	uint32_t package_index;
+} cmd_data_upgrade_ack_t;
+
+typedef __packed struct {
+	uint8_t encrypt;
+	uint8_t md5[16];
+} cmd_end_upgrade_req_t;
+
+typedef __packed struct {
+	uint8_t result;
+} cmd_end_upgrade_ack_t;
+
+typedef __packed struct {
+	uint8_t encrypt;
+    uint8_t type;
+	uint32_t delay_ms;
+	uint8_t reserve[8];
+} cmd_reboot_req_t;
+
+typedef __packed struct {
+	uint8_t result;
+} cmd_reboot_ack_t;
+
+typedef __packed struct {
+	__packed struct {
+		uint8_t minor : 4;
+		uint8_t major : 4;
+	} ver;
+} cmd_status_report_req_t;
+
+typedef __packed struct {
+	uint8_t result;
+	__packed struct {
+		uint8_t minor : 4;
+		uint8_t major : 4;
+	} ver;
+	uint32_t status;
+} cmd_status_report_ack_t;
+
+typedef __packed struct {
+	__packed struct {
+		uint8_t minor : 4;
+		uint8_t major : 4;
+	} ver;
+    uint8_t hardware_ver[16];
+} cmd_set_version_req_t;
+
+typedef __packed struct {
+	uint8_t result;
+	__packed struct {
+		uint8_t minor : 4;
+		uint8_t major : 4;
+	} ver;
+	uint8_t hardware_ver[16];
+} cmd_set_version_ack_t;
+
+typedef void ( *ptr_func_handler )( uint8_t *p_buf, uint16_t len );
+
+typedef struct {
+	ptr_func_handler 	handler;	
+	uint16_t      		id;
+} handler_pair_v0_t;
+
+typedef struct {
+	ptr_func_handler 	handler;	
+	uint8_t   	   		id;
+	uint8_t 		    set;
+} handler_pair_v1_t;
+
+#define DEVICE_ID			    (9)
+#define DEVICE_INDEX	        (0)
+
+#define DEVICE_LOADER_VERSION   (0x01000000)
+
+uint8_t get_command_version( uint8_t *p_buf, uint8_t len );
+void command_process_v0( uint8_t *p_buf, uint16_t len );
+void command_process_v1( uint8_t *p_buf, uint16_t len );
+
+void cfg_status_report( void );
+
+/*******************  (C) COPYRIGHT 2012 DJI ************END OF FILE***********/
+#endif
+

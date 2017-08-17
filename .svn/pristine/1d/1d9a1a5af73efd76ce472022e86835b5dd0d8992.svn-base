@@ -1,0 +1,48 @@
+#include "lpc17xx_timer.h"
+
+static volatile uint8_t timer0_10ms_timeout_flag = 0;
+
+void TIMER0_IRQHandler( void )
+{
+	uint32_t ir_reg = LPC_TIM0->IR;
+	LPC_TIM0->IR = ir_reg;
+	timer0_10ms_timeout_flag = 1;
+}
+
+void TIMER0_Init( void )
+{
+	LPC_SC->PCONP |= ( 1 << 1 );
+	
+	LPC_TIM0->TCR = 0x02;
+	LPC_TIM0->IR   = 0xF;
+	LPC_TIM0->CTCR = 0;
+	LPC_TIM0->PR   = 24;
+	LPC_TIM0->MR0	 = 10000; 	// 10ms
+	LPC_TIM0->MCR  = 0x3;
+	NVIC_EnableIRQ( TIMER0_IRQn );
+}
+
+void TIMER0_Start( void )
+{
+	LPC_TIM0->TCR = 0x01;
+}
+
+void TIMER0_Stop( void )
+{
+	LPC_TIM0->TCR &= ~0x01;
+}
+
+void TIMER0_Reset( void )
+{
+	LPC_TIM0->TCR |= 0x02;
+}
+
+uint8_t TIMER0_10Ms_Timeout( void )
+{
+	if( timer0_10ms_timeout_flag ) {
+		timer0_10ms_timeout_flag = 0;
+		return 1;
+	} else {
+		return 0;
+	}
+}

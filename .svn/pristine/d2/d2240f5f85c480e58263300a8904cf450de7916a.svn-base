@@ -1,0 +1,44 @@
+;  ******************** (C) COPYRIGHT 2012 DJI **********************************
+;  *
+;  * @Project Name       £ºruling.uvproj
+;  * @File Name          : Lpc1768_flash.scat
+;  * @Environment        : keil mdk4.12/LPC1768/100M cclock
+;  * @Author&Date        : 2012-06-04 
+;  * @Version            : 1.00
+;  ******************************************************************************
+;  * @Description
+;  *	    link scatter file 
+;  */
+
+;lpc1768 internal flash ROM 0x00000000~0x0007FFFF SIZE 0x00080000 
+LR_IROM1 0x00010000 0x00070000
+{
+    ER_IROM1 0x00010000 0x00070000
+    {
+   	    vectors.o(VECT,+First)
+	    init.o(INIT)
+	    *(+RO)
+    }
+
+    ;lpc1768 internal SRAM 0x10000000~0x10007FFF SIZE 0x00008000
+    ER_IRAM1 0x10000000 0x00007000
+    {
+   	    *(+RW,+ZI)
+    }
+
+    ;for heap and stack	 SIZE 0x00000F00
+    ARM_LIB_HEAP 0x10007000 EMPTY  0x00000300 {}
+    ARM_LIB_STACK 0x10007F60 EMPTY -0X00000C60 {}
+											   
+    ;AHB SRAM - bank0 0x200C0000~0x2007FFFF SIZE 0x00004000
+	ER_IRAM2_ETHERNET 0x2007C000 0x00004000
+    {
+        *(ETHERNET_RAM)
+    }
+
+	;AHB SRAM - bank1 0x20080000~0x20083FFF	SIZE 0x00004000
+	ER_IRAM3_USB 0x20080000 0x00004000
+	{
+	    *(USB_RAM) 
+	}
+}

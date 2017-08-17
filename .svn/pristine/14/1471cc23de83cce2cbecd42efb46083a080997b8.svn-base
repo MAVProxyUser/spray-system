@@ -1,0 +1,122 @@
+/**
+  ******************** (C) COPYRIGHT 2011 DJI **********************************
+  *
+  * @Project Name       : BL_WKM2_MAIN.uvproj
+  * @File Name          : cfg_unpack.c
+  * @Environment        : keil mdk4.12/LPC1765/100M cclock
+  * @Author&Date        : 2012-05-28 
+  * @Version            : 1.00
+  ******************************************************************************
+  * @Description
+  *	    Begginning of application   
+  */
+#include <string.h>
+#include "../../cstartup/type.h"
+#include "../../drivers/drivers.h"
+#include "../../can/can_inc.h"
+#include "../../usb/vcom_app.h"
+#include "cfg_inc.h"
+#include "../crc/MF_CRC8.h"
+#include "../crc/MF_CRC16.h"
+#include "cfg_decoder.h"
+
+#if __USB_ENABLE__
+#define USB_UNPACK_MAX_SIZE     (512)
+    static uint8_t usb_data_buff[USB_UNPACK_MAX_SIZE];
+    cfg_decoder_object_t usb_decoder_obj;
+#endif
+#if __CAN1_ENABLE__
+#define CAN1_UNPACK_MAX_SIZE     (512)
+    static uint8_t can1_data_buff[CAN1_UNPACK_MAX_SIZE];
+    cfg_decoder_object_t can1_decoder_obj;
+#endif
+#if __CAN2_ENABLE__
+#define CAN2_UNPACK_MAX_SIZE     (512)
+    static uint8_t can2_data_buff[CAN2_UNPACK_MAX_SIZE];
+    cfg_decoder_object_t can2_decoder_obj;
+#endif
+#ifdef __UART0__
+#define UART0_UNPACK_MAX_SIZE     (512)
+    static uint8_t uart0_data_buff[UART0_UNPACK_MAX_SIZE];
+    cfg_decoder_object_t uart0_decoder_obj;
+#endif
+#ifdef __UART1__
+#define UART1_UNPACK_MAX_SIZE     (512)
+    static uint8_t uart1_data_buff[UART1_UNPACK_MAX_SIZE];
+    cfg_decoder_object_t uart1_decoder_obj;
+#endif
+#ifdef __UART2__
+#define UART2_UNPACK_MAX_SIZE     (512)
+    static uint8_t uart2_data_buff[UART2_UNPACK_MAX_SIZE];
+    cfg_decoder_object_t uart2_decoder_obj;
+#endif
+#ifdef __UART3__
+#define UART3_UNPACK_MAX_SIZE     (512)
+    static uint8_t uart3_data_buff[UART3_UNPACK_MAX_SIZE];
+    cfg_decoder_object_t uart3_decoder_obj;
+#endif
+
+void cfg_unpack_init( void )
+{
+#if __USB_ENABLE__
+    cfg_decoder_init( &usb_decoder_obj, usb_data_buff, USB_UNPACK_MAX_SIZE );
+#endif
+#if __CAN1_ENABLE__
+    cfg_decoder_init( &can1_decoder_obj, can1_data_buff, CAN1_UNPACK_MAX_SIZE );
+#endif
+#if __CAN2_ENABLE__
+    cfg_decoder_init( &can2_decoder_obj, can2_data_buff, CAN2_UNPACK_MAX_SIZE );
+#endif
+#ifdef __UART0__
+    cfg_decoder_init( &uart0_decoder_obj, uart0_data_buff, UART0_UNPACK_MAX_SIZE );
+#endif
+#ifdef __UART1__
+    cfg_decoder_init( &uart1_decoder_obj, uart1_data_buff, UART1_UNPACK_MAX_SIZE );
+#endif
+#ifdef __UART2__
+    cfg_decoder_init( &uart2_decoder_obj, uart2_data_buff, UART2_UNPACK_MAX_SIZE );
+#endif
+#ifdef __UART3__
+    cfg_decoder_init( &uart3_decoder_obj, uart3_data_buff, UART3_UNPACK_MAX_SIZE );
+#endif
+}
+
+void cfg_unpack_tick( void )        
+{
+	uint8_t data = 0;
+    uint16_t length = 0;
+
+#if __USB_ENABLE__
+	length = OutBufAvailBytes();
+    while( length-- ) {
+        data = VCOM_GetByte();
+        if( cfg_decoder_upack( &usb_decoder_obj, data ) ) {
+            g_cfg_end_point = EP_USB;
+            command_process_v1( usb_decoder_obj.p_data, usb_decoder_obj.len );
+            g_cfg_end_point = EP_NULL;
+        }
+    }
+#endif
+#if __CAN1_ENABLE__
+	length = CAN_RING_BUF_COUNT( &can1RxRingBuf );
+    while( length-- ) {
+        data = CAN_RING_BUF_RD( &can1RxRingBuf );
+        if( cfg_decoder_upack( &can1_decoder_obj, data ) ) {
+            g_cfg_end_point = EP_CAN1;
+            command_process_v1( can1_decoder_obj.p_data, can1_decoder_obj.len );
+            g_cfg_end_point = EP_NULL;
+        }
+    }
+#endif
+#if __CAN2_ENABLE__
+	length = CAN_RING_BUF_COUNT( &can2RxRingBuf );
+    while( length-- ) {
+        data = CAN_RING_BUF_RD( &can2RxRingBuf );
+        if( cfg_decoder_upack( &can2_decoder_obj, data ) ) {
+            g_cfg_end_point = EP_CAN2;
+            command_process_v1( can2_decoder_obj.p_data, can2_decoder_obj.len );
+            g_cfg_end_point = EP_NULL;
+        }
+    }
+#endif
+}

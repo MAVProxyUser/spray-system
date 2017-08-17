@@ -1,0 +1,633 @@
+//-----------------------------------------------------------------------------
+// Software that is described herein is for illustrative purposes only  
+// which provides customers with programming information regarding the  
+// products. This software is supplied "AS IS" without any warranties.  
+// NXP Semiconductors assumes no responsibility or liability for the 
+// use of the software, conveys no license or title under any patent, 
+// copyright, or mask work right to the product. NXP Semiconductors 
+// reserves the right to make changes in the software without 
+// notification. NXP Semiconductors also make no representation or 
+// warranty that such application will be suitable for the specified 
+// use without further testing or modification. 
+//-----------------------------------------------------------------------------
+
+//#include "type.h"
+//#include "nvic.h"
+#include "LPC17xx.h"
+#include "string.h"
+#include "../bsp/bsp.h"
+#include "sbl_iap.h"
+#include "sbl_config.h"
+#include "../app/aes/aes.h"
+#include "../drivers/drivers.h"
+#include "../app/cfg/cfg_handler.h"
+#include "stdbool.h"
+
+//密码分散存储
+//unsigned int const key_part1 __attribute__((section(".ARM.__at_0x1188"))) = 0x8c87ec6e;
+//unsigned int const key_part2 __attribute__((section(".ARM.__at_0x12FC"))) = 0x4e5a65ef;
+//unsigned int const key_part3 __attribute__((section(".ARM.__at_0x1a78"))) = 0xac97b1e8;
+//unsigned int const key_part4 __attribute__((section(".ARM.__at_0x1c54"))) = 0x51b4da85;
+
+//LPC17xx flash加密位 ，位置为0x02fc，lpc23xx为0x1fc
+//const uint32_t crp __attribute__((section(".ARM.__at_0x2FC"))) = CRP;
+
+const uint32_t sector_start_map[MAX_FLASH_SECTOR] = {SECTOR_0_START,             \
+SECTOR_1_START,SECTOR_2_START,SECTOR_3_START,SECTOR_4_START,SECTOR_5_START,      \
+SECTOR_6_START,SECTOR_7_START,SECTOR_8_START,SECTOR_9_START,SECTOR_10_START,     \
+SECTOR_11_START,SECTOR_12_START,SECTOR_13_START,SECTOR_14_START,SECTOR_15_START, \
+SECTOR_16_START,SECTOR_17_START,SECTOR_18_START,SECTOR_19_START,SECTOR_20_START, \
+SECTOR_21_START,SECTOR_22_START,SECTOR_23_START,SECTOR_24_START,SECTOR_25_START, \
+SECTOR_26_START,SECTOR_27_START,SECTOR_28_START,SECTOR_29_START					 };
+
+const uint32_t sector_end_map[MAX_FLASH_SECTOR] = {SECTOR_0_END,SECTOR_1_END,    \
+SECTOR_2_END,SECTOR_3_END,SECTOR_4_END,SECTOR_5_END,SECTOR_6_END,SECTOR_7_END,   \
+SECTOR_8_END,SECTOR_9_END,SECTOR_10_END,SECTOR_11_END,SECTOR_12_END,             \
+SECTOR_13_END,SECTOR_14_END,SECTOR_15_END,SECTOR_16_END,SECTOR_17_END,           \
+SECTOR_18_END,SECTOR_19_END,SECTOR_20_END,SECTOR_21_END,SECTOR_22_END,           \
+SECTOR_23_END,SECTOR_24_END,SECTOR_25_END,SECTOR_26_END,                         \
+SECTOR_27_END,SECTOR_28_END,SECTOR_29_END										 };
+
+uint32_t param_table[5];
+uint32_t result_table[5];
+
+uint32_t cclk = CCLK;
+uint8_t  flash_buf[FLASH_BUF_SIZE];
+
+uint32_t *flash_address = 0;
+uint32_t byte_ctr = 0;
+
+void write_data(uint32_t cclk,uint32_t flash_address,uint32_t * flash_data_buf, uint32_t count);
+void find_erase_prepare_sector(uint32_t cclk, uint32_t flash_address);
+void erase_sector(uint32_t start_sector,uint32_t end_sector,uint32_t cclk);
+void prepare_sector(uint32_t start_sector,uint32_t end_sector,uint32_t cclk);
+void iap_entry(uint32_t param_tab[],uint32_t result_tab[]);
+void enable_interrupts(uint32_t interrupts);
+void disable_interrupts(uint32_t interrupts);
+
+
+
+uint32_t write_flash(uint32_t * dst, uint8_t * src, uint32_t no_of_bytes)
+{
+    uint32_t i;
+
+  if (flash_address == 0)
+	{
+		/* Store flash start address */
+		flash_address = (uint32_t *)dst;
+	}
+	for( i = 0;i<no_of_bytes;i++ )
+	{
+		flash_buf[(byte_ctr+i)] = *(src+i);
+    }
+	byte_ctr = byte_ctr + no_of_bytes;
+
+	if( byte_ctr == FLASH_BUF_SIZE)
+	{
+	  /* We have accumulated enough bytes to trigger a flash write */
+	  find_erase_prepare_sector(cclk, (uint32_t)flash_address);
+      if(result_table[0] != CMD_SUCCESS)
+      {
+        return (1); /* No way to recover. Just let Windows report a write failure */
+      }
+      write_data(cclk,(uint32_t)flash_address,(uint32_t *)flash_buf,FLASH_BUF_SIZE);
+      if(result_table[0] != CMD_SUCCESS)
+      {
+        return (1); /* No way to recover. Just let Windows report a write failure */
+      }
+	  /* Reset byte counter and flash address */
+	  byte_ctr      = 0;
+	  flash_address = 0;
+	}
+    return(CMD_SUCCESS);
+}
+
+
+void find_erase_prepare_sector(uint32_t cclk, uint32_t flash_address)
+{
+    uint32_t i;
+    CPU_SR_ALLOC();
+	
+	CPU_CRITICAL_ENTER();
+
+    for(i=USER_START_SECTOR;i<=MAX_USER_SECTOR;i++)
+    {
+        if(flash_address < sector_end_map[i])
+        {
+            if( flash_address == sector_start_map[i])
+            {
+                prepare_sector(i,i,cclk);
+                erase_sector(i,i,cclk);
+            }
+            prepare_sector(i,i,cclk);
+            break;
+        }
+    }
+	CPU_CRITICAL_EXIT();
+}
+
+uint8_t erase_user_area(void)
+{
+ 	prepare_sector(USER_START_SECTOR,MAX_USER_SECTOR,cclk);
+	erase_sector(USER_START_SECTOR,MAX_USER_SECTOR,cclk);
+	if( result_table[0] != CMD_SUCCESS ) {
+		return 0;
+	}
+	return 1;
+}
+
+void write_data(uint32_t cclk,uint32_t flash_address,uint32_t * flash_data_buf, uint32_t count)
+{
+    CPU_SR_ALLOC();
+	
+	CPU_CRITICAL_ENTER();
+    param_table[0] = COPY_RAM_TO_FLASH;
+    param_table[1] = flash_address;
+    param_table[2] = (uint32_t)flash_data_buf;
+    param_table[3] = count;
+    param_table[4] = cclk;
+    iap_entry(param_table,result_table);
+	CPU_CRITICAL_EXIT();
+}
+
+void erase_sector(uint32_t start_sector,uint32_t end_sector,uint32_t cclk)
+{
+    CPU_SR_ALLOC();
+	
+	CPU_CRITICAL_ENTER();
+	    
+	param_table[0] = ERASE_SECTOR;
+    param_table[1] = start_sector;
+    param_table[2] = end_sector;
+    param_table[3] = cclk;
+    iap_entry(param_table,result_table);
+	CPU_CRITICAL_EXIT();
+}
+
+void prepare_sector(uint32_t start_sector,uint32_t end_sector,uint32_t cclk)
+{
+    param_table[0] = PREPARE_SECTOR_FOR_WRITE;
+    param_table[1] = start_sector;
+    param_table[2] = end_sector;
+    param_table[3] = cclk;
+    iap_entry(param_table,result_table);
+}
+
+/*
+** Description : used to verify data had be pragramming 
+** Input : 
+** return :	
+** Note : the start of flash_address or ram_address shulde not the first of 64 bytes for address 0 
+*/
+unsigned compare_data(unsigned flash_address,unsigned ram_address,unsigned length)
+{
+    CPU_SR_ALLOC();
+	
+	CPU_CRITICAL_ENTER();
+	param_table[0] = COMPARE;
+    param_table[1] = flash_address;
+    param_table[2] = ram_address;
+	param_table[3] = length;
+    iap_entry(param_table,result_table);
+	CPU_CRITICAL_EXIT();
+	if(result_table[0] != CMD_SUCCESS)
+    {
+        return (0); 
+    }
+	return (1);
+}
+
+void iap_entry(uint32_t param_tab[],uint32_t result_tab[])
+{
+    void (*iap)(uint32_t [],uint32_t []);
+
+    iap = (void (*)(uint32_t [],uint32_t []))IAP_ADDRESS;
+    iap(param_tab,result_tab);
+}
+
+__asm void boot_jump( uint32_t address ){
+   LDR SP, [R0]		;Load new stack pointer address
+   LDR PC, [R0, #4]	;Load new program counter address
+}
+
+void execute_user_code(void)
+{
+	/* Change the Vector Table to the USER_FLASH_START 
+	in case the user application uses interrupts */
+	SCB->VTOR = USER_FLASH_START & 0x1FFFFF80;
+
+	boot_jump(USER_FLASH_START);
+}
+
+uint32_t user_code_present(void)
+{
+    param_table[0] = BLANK_CHECK_SECTOR;
+    param_table[1] = USER_START_SECTOR;
+    param_table[2] = USER_START_SECTOR;
+    iap_entry(param_table,result_table);
+	if( result_table[0] == CMD_SUCCESS )
+	{
+	    return (0);
+	}
+	else
+	{
+	    return (1);
+	}
+}
+
+//static 
+//read_data( uint32_t flash_addr,
+//                             uint8_t *buf, uint32_t length )
+//{
+//	uint8_t *des = (uint8_t *)flash_addr;
+//	while(length--)
+//	{
+//	    *buf++ = *des++;     
+//	}
+//}
+
+static 
+read_data32( uint32_t flash_addr,
+                             uint32_t *buf, uint32_t length )
+{
+   uint32_t *des = (uint32_t *)flash_addr;
+   while(length)
+   {
+       *buf++ = *des++;
+	   length -= 1;     /* 单为int型数据的个数 */ 
+   }
+}
+
+/* for applications ----------------------------------------------------------*/
+static uint32_t WriteBuf[64]__attribute__ ((section("ETHERNET_RAM"),aligned));    //存储数量大时，增加缓冲区数量 256 = 64*4
+
+void read_flash_data( uint32_t *flash_addr,
+                          uint8_t  *buf ,uint32_t len)
+{	
+	uint8_t *des = (uint8_t *)flash_addr;
+	while(len--)
+	{
+	   *buf++ = *des++;     
+	}
+}
+
+uint8_t write_flash_data ( uint32_t OffSet, 
+                           uint8_t* buf, uint32_t len )
+{
+	if( (OffSet+len) > MAX_LENGTH )
+	{
+	    return DEF_FALSE;
+	}
+	
+	read_data32(FLASH_DATA_ADDR_START,&WriteBuf[0],64); /* 64*4 */
+	memcpy((uint8_t *)&WriteBuf[0]+OffSet,buf,len);
+	
+	prepare_sector(FLASH_DATA_SECTOR_START,FLASH_DATA_SECTOR_START,IAP_CCLK);        /* select sector */
+	erase_sector(FLASH_DATA_SECTOR_START,FLASH_DATA_SECTOR_START,IAP_CCLK);	         //erase sector for write
+	
+	prepare_sector(FLASH_DATA_SECTOR_START,FLASH_DATA_SECTOR_START,IAP_CCLK);        //select sector
+	
+	write_data(IAP_CCLK,FLASH_DATA_ADDR_START,(unsigned int*)&WriteBuf[0],256);
+
+    
+    return DEF_TRUE;
+}
+
+/*从FLASH读取用户数据*/
+void read_flash_data_offset( uint32_t start_add , uint32_t OffSet,
+                          uint8_t  *buf ,uint32_t len)
+{
+	uint8_t *des = (uint8_t *)( start_add + OffSet );
+
+	if( (OffSet+len) > USER_DATA_MAX_SIZE )
+	{
+	    return ;
+	}
+	while(len--)
+	{
+	   *buf++ = *des++;
+	}
+}
+
+uint8_t write_flash_data_offset (uint32_t start_add , uint32_t OffSet, 
+                           uint8_t* buf, uint32_t len )
+{
+	if( (OffSet+len) > MAX_LENGTH )
+	{
+	    return DEF_FALSE;
+	}
+	
+	read_data32(start_add,&WriteBuf[0],64); /* 64*4 */
+	memcpy((uint8_t *)&WriteBuf[0]+OffSet,buf,len);
+	
+	prepare_sector(FLASH_DATA_SECTOR_START,FLASH_DATA_SECTOR_START,IAP_CCLK);        /* select sector */
+	erase_sector(FLASH_DATA_SECTOR_START,FLASH_DATA_SECTOR_START,IAP_CCLK);	         //erase sector for write
+	
+	prepare_sector(FLASH_DATA_SECTOR_START,FLASH_DATA_SECTOR_START,IAP_CCLK);        //select sector
+	
+	write_data(IAP_CCLK,FLASH_DATA_ADDR_START,(unsigned int*)&WriteBuf[0],256);
+
+    return DEF_TRUE;
+}
+
+void check_iap_entry_init( void )
+{
+	PINSEL4 &= ~( ( 3ul << 4 ) | ( 3ul << 8 ) ); //p0.2,p0.3
+	ISP_ENTRY_PIN_00_IN;
+	ISP_ENTRY_PIN_01_OUT;	
+}
+
+void check_iap_entry_pin( void )
+{
+	unsigned int i,cnt; //硬件入口虑波	
+	
+	cnt = 0;
+	if( *( ( uint32_t * )PROGRAM_FLAG_ADDR ) == 0x77557755 ) {
+		ISP_ENTRY_PIN_01_OUT_H;
+		for( i = 50; i > 0; i-- ); // delay for gpio ready
+		if( ISP_ENTRY_PIN_00_RD ) {
+			for( i = 50; i > 0; i-- ) {
+				if( !ISP_ENTRY_PIN_00_RD ) {
+					cnt++;
+				}
+			}
+			if( cnt == 0 ) {
+				ISP_ENTRY_PIN_01_OUT_L;
+				for( i = 50; i > 0; i-- ); // delay for gpio ready
+				if( !ISP_ENTRY_PIN_00_RD ) {
+					for( i = 50; i > 0; i-- ) {
+						if( ISP_ENTRY_PIN_00_RD ) {
+							cnt++;
+						}
+					}
+					if( cnt == 0 ) {
+						ISP_ENTRY_PIN_01_OUT_H;
+						for( i = 50; i > 0; i-- ); // delay for gpio ready
+						if( ISP_ENTRY_PIN_00_RD ) {
+							for( i = 50; i > 0; i-- ) {
+								if( !ISP_ENTRY_PIN_00_RD ) {
+									cnt++;
+								}
+							}
+							if( cnt == 0 ) {
+								return;
+							}
+						}
+					}
+				}
+			}
+		}
+//		place_aes_key();			
+		execute_user_code();		
+	}
+}
+
+void erase_user_flash(void)
+{
+    prepare_sector(USER_START_SECTOR,MAX_USER_SECTOR,cclk);
+    erase_sector(USER_START_SECTOR,MAX_USER_SECTOR,cclk);
+	if(result_table[0] != CMD_SUCCESS)
+    {
+      while(1); /* No way to recover. Just let Windows report a write failure */
+    }
+}
+
+void write_programming_done_flag(void)
+{
+	read_data32(PROGRAM_FLAG_ADDR,&WriteBuf[0],64);                       /* 64*4 */
+	*(unsigned int*)&WriteBuf[0] =  0x77557755;
+	*(unsigned int*)&WriteBuf[4] = ~0x77557755;
+    WDT_Feed();
+	prepare_sector(PROGRAM_FLAG_SECTOR,PROGRAM_FLAG_SECTOR,CCLK);         //select sector
+	erase_sector(PROGRAM_FLAG_SECTOR,PROGRAM_FLAG_SECTOR,CCLK);	          //erase sector for write
+	prepare_sector(PROGRAM_FLAG_SECTOR,PROGRAM_FLAG_SECTOR,CCLK);         //select sector
+	write_data(CCLK,PROGRAM_FLAG_ADDR,(unsigned int*)&WriteBuf[0],256);   //count must be 256,512,1024,4096
+}
+
+void erase_programming_done_flag(void)
+{
+	read_data32(PROGRAM_FLAG_ADDR,&WriteBuf[0],64);                       /* 64*4 */
+	*(unsigned int*)&WriteBuf[0] =  0x0;
+	*(unsigned int*)&WriteBuf[4] =  0x0;
+    WDT_Feed();
+	prepare_sector(PROGRAM_FLAG_SECTOR,PROGRAM_FLAG_SECTOR,CCLK);         //select sector
+	erase_sector(PROGRAM_FLAG_SECTOR,PROGRAM_FLAG_SECTOR,CCLK);	          //erase sector for write
+	prepare_sector(PROGRAM_FLAG_SECTOR,PROGRAM_FLAG_SECTOR,CCLK);         //select sector
+	write_data(CCLK,PROGRAM_FLAG_ADDR,(unsigned int*)&WriteBuf[0],256);   //count must be 256,512,1024,4096
+}
+
+void hardware_id_read_flash(uint8_t *buf, uint32_t len)
+{
+    read_flash_data((CPU_INT32U *)HARDWARE_ID_ADDR,buf,len);
+}
+
+bool hardware_id_write_flash(CPU_INT08U *buf, CPU_INT32U len)
+{
+    uint32_t i = 0;
+    WDT_Feed();
+ 	read_data32(HARDWARE_ID_ADDR,&WriteBuf[0],64);              /* 64*4 */
+
+	memcpy((CPU_INT08U *)&WriteBuf[0],buf,len);
+
+	prepare_sector(HARDWARE_ID_SECTOR,HARDWARE_ID_SECTOR,CCLK);      //select sector
+
+    WDT_Feed();            /* feed watchdog */
+    erase_sector(HARDWARE_ID_SECTOR,HARDWARE_ID_SECTOR,CCLK);	    //erase sector for write
+    WDT_Feed();            /* feed watchdog */
+
+    prepare_sector(HARDWARE_ID_SECTOR,HARDWARE_ID_SECTOR,CCLK);      //select sector
+    write_data(CCLK,HARDWARE_ID_ADDR,(CPU_INT32U*)&WriteBuf[0],256); //write length must be 256,512,1024,4096
+    WDT_Feed(); 
+    read_data32(HARDWARE_ID_ADDR,&WriteBuf[0],64);
+    for( i = 0; i < len; i++ ) {
+        if( buf[i] != *( ( uint8_t * )WriteBuf + i ) ) return false;
+    }
+    return true;
+}
+
+static uint32_t lader_version __attribute__((at(0x10007F70))) = 0;
+static uint32_t lader_n_version __attribute__((at(0x10007F74))) = 0;
+void place_aes_key(void)
+{
+	lader_version =  DEVICE_LOADER_VERSION;
+	lader_n_version = ~DEVICE_LOADER_VERSION;
+}
+
+uint32_t sbl_get_loader_version( void )
+{
+    if( *( uint32_t * )0x10007F70 == ~( *( uint32_t * )0x10007F74 ) ) {
+        return *( uint32_t * )0x10007F70;
+    } else {
+//        uart_printf( 0, "%.8X %.8X\r\n", *( uint32_t * )0x10007F70, *( uint32_t * )0x10007F74 );
+        return 0xFFFFFFFF;
+    }
+}
+
+bool cali_pressure1_para_write_flash( uint8_t *buf , uint32_t len )
+{
+  uint32_t i = 0;
+  WDT_Feed();
+ 	read_data32(HARDWARE_ID_ADDR,&WriteBuf[0],64);              /* 64*4 */
+
+	memcpy((CPU_INT08U *)&WriteBuf[0]+CALI_PRESSURE1_PARA_OFFSET,buf,len);
+	prepare_sector(HARDWARE_ID_SECTOR,HARDWARE_ID_SECTOR,CCLK);      //select sector
+
+   WDT_Feed();            /* feed watchdog */
+   erase_sector(HARDWARE_ID_SECTOR,HARDWARE_ID_SECTOR,CCLK);	    //erase sector for write
+   WDT_Feed();            /* feed watchdog */
+
+    prepare_sector(HARDWARE_ID_SECTOR,HARDWARE_ID_SECTOR,CCLK);      //select sector
+    write_data(CCLK,HARDWARE_ID_ADDR,(CPU_INT32U*)&WriteBuf[0],256); //write length must be 256,512,1024,4096
+    WDT_Feed(); 
+    read_data32(HARDWARE_ID_ADDR,&WriteBuf[0],64);
+    for( i = 0; i < len; i++ ) {
+        if( buf[i] != *( ( uint8_t * )WriteBuf + i +CALI_PRESSURE1_PARA_OFFSET ) ) return false;
+    }
+    return true;
+}
+
+
+bool cali_pressure2_para_write_flash( uint8_t *buf , uint32_t len )
+{
+  uint32_t i = 0;
+  WDT_Feed();
+ 	read_data32(HARDWARE_ID_ADDR,&WriteBuf[0],64);              /* 64*4 */
+
+	memcpy((CPU_INT08U *)&WriteBuf[0]+CALI_PRESSURE2_PARA_OFFSET,buf,len);
+	prepare_sector(HARDWARE_ID_SECTOR,HARDWARE_ID_SECTOR,CCLK);      //select sector
+
+   WDT_Feed();            /* feed watchdog */
+   erase_sector(HARDWARE_ID_SECTOR,HARDWARE_ID_SECTOR,CCLK);	    //erase sector for write
+   WDT_Feed();            /* feed watchdog */
+
+    prepare_sector(HARDWARE_ID_SECTOR,HARDWARE_ID_SECTOR,CCLK);      //select sector
+    write_data(CCLK,HARDWARE_ID_ADDR,(CPU_INT32U*)&WriteBuf[0],256); //write length must be 256,512,1024,4096
+    WDT_Feed(); 
+    read_data32(HARDWARE_ID_ADDR,&WriteBuf[0],64);
+    for( i = 0; i < len; i++ ) {
+        if( buf[i] != *( ( uint8_t * )WriteBuf + i +CALI_PRESSURE2_PARA_OFFSET ) ) return false;
+    }
+    return true;
+}
+
+
+bool cali_flow_para1_write_flash( uint8_t *buf , uint32_t len )
+{
+  uint32_t i = 0;
+  WDT_Feed();
+ 	read_data32(HARDWARE_ID_ADDR,&WriteBuf[0],64);              /* 64*4 */
+
+	memcpy((CPU_INT08U *)&WriteBuf[0]+CALI_FLOW1_PARA_OFFSET,buf,len);
+	prepare_sector(HARDWARE_ID_SECTOR,HARDWARE_ID_SECTOR,CCLK);      //select sector
+
+   WDT_Feed();            /* feed watchdog */
+   erase_sector(HARDWARE_ID_SECTOR,HARDWARE_ID_SECTOR,CCLK);	    //erase sector for write
+   WDT_Feed();            /* feed watchdog */
+
+    prepare_sector(HARDWARE_ID_SECTOR,HARDWARE_ID_SECTOR,CCLK);      //select sector
+    write_data(CCLK,HARDWARE_ID_ADDR,(CPU_INT32U*)&WriteBuf[0],256); //write length must be 256,512,1024,4096
+    WDT_Feed(); 
+    read_data32(HARDWARE_ID_ADDR,&WriteBuf[0],64);
+    for( i = 0; i < len; i++ ) {
+        if( buf[i] != *( ( uint8_t * )WriteBuf + i +CALI_FLOW1_PARA_OFFSET ) ) return false;
+    }
+    return true;
+}
+
+bool cali_flow_para2_write_flash( uint8_t *buf , uint32_t len )
+{
+  uint32_t i = 0;
+  WDT_Feed();
+ 	read_data32(HARDWARE_ID_ADDR,&WriteBuf[0],64);              /* 64*4 */
+
+	memcpy((CPU_INT08U *)&WriteBuf[0]+CALI_FLOW2_PARA_OFFSET,buf,len);
+	prepare_sector(HARDWARE_ID_SECTOR,HARDWARE_ID_SECTOR,CCLK);      //select sector
+
+   WDT_Feed();            /* feed watchdog */
+   erase_sector(HARDWARE_ID_SECTOR,HARDWARE_ID_SECTOR,CCLK);	    //erase sector for write
+   WDT_Feed();            /* feed watchdog */
+
+    prepare_sector(HARDWARE_ID_SECTOR,HARDWARE_ID_SECTOR,CCLK);      //select sector
+    write_data(CCLK,HARDWARE_ID_ADDR,(CPU_INT32U*)&WriteBuf[0],256); //write length must be 256,512,1024,4096
+    WDT_Feed(); 
+    read_data32(HARDWARE_ID_ADDR,&WriteBuf[0],64);
+    for( i = 0; i < len; i++ ) {
+        if( buf[i] != *( ( uint8_t * )WriteBuf + i +CALI_FLOW2_PARA_OFFSET ) ) return false;
+    }
+    return true;
+}
+bool residual_volume_para_write_flash( uint8_t *buf , uint32_t len )
+{
+  uint32_t i = 0;
+  WDT_Feed();
+ 	read_data32(HARDWARE_ID_ADDR,&WriteBuf[0],64);              /* 64*4 */
+
+	memcpy((CPU_INT08U *)&WriteBuf[0]+RESIDUAL_VOLUME_PARA_OFFSET,buf,len);
+	prepare_sector(HARDWARE_ID_SECTOR,HARDWARE_ID_SECTOR,CCLK);      //select sector
+
+  WDT_Feed();            /* feed watchdog */
+  erase_sector(HARDWARE_ID_SECTOR,HARDWARE_ID_SECTOR,CCLK);	    //erase sector for write
+  WDT_Feed();            /* feed watchdog */
+
+  prepare_sector(HARDWARE_ID_SECTOR,HARDWARE_ID_SECTOR,CCLK);      //select sector
+  write_data(CCLK,HARDWARE_ID_ADDR,(CPU_INT32U*)&WriteBuf[0],256); //write length must be 256,512,1024,4096
+  WDT_Feed(); 
+  read_data32(HARDWARE_ID_ADDR,&WriteBuf[0],64);
+  for( i = 0; i < len; i++ ) {
+        if( buf[i] != *( ( uint8_t * )WriteBuf + i +RESIDUAL_VOLUME_PARA_OFFSET ) ) return false;
+   }
+  return true;
+}
+
+bool flowmeter_para_write_flash( uint8_t *buf , uint32_t len )
+{
+  uint32_t i = 0;
+  WDT_Feed();
+ 	read_data32(HARDWARE_ID_ADDR,&WriteBuf[0],64);              /* 64*4 */
+
+	memcpy((CPU_INT08U *)&WriteBuf[0]+FLOWMETER_PARA_OFFSET,buf,len);
+	prepare_sector(HARDWARE_ID_SECTOR,HARDWARE_ID_SECTOR,CCLK);      //select sector
+
+  WDT_Feed();            /* feed watchdog */
+  erase_sector(HARDWARE_ID_SECTOR,HARDWARE_ID_SECTOR,CCLK);	    //erase sector for write
+  WDT_Feed();            /* feed watchdog */
+
+  prepare_sector(HARDWARE_ID_SECTOR,HARDWARE_ID_SECTOR,CCLK);      //select sector
+  write_data(CCLK,HARDWARE_ID_ADDR,(CPU_INT32U*)&WriteBuf[0],256); //write length must be 256,512,1024,4096
+  WDT_Feed(); 
+  read_data32(HARDWARE_ID_ADDR,&WriteBuf[0],64);
+  for( i = 0; i < len; i++ ) {
+        if( buf[i] != *( ( uint8_t * )WriteBuf + i +FLOWMETER_PARA_OFFSET ) ) return false;
+   }
+  return true;
+}
+
+
+void cali_pressure1_para_read_flash(uint8_t *buf, uint32_t len)
+{
+    read_flash_data_offset(HARDWARE_ID_ADDR,CALI_PRESSURE1_PARA_OFFSET,buf,len);
+}
+
+void cali_pressure2_para_read_flash(uint8_t *buf, uint32_t len)
+{
+    read_flash_data_offset(HARDWARE_ID_ADDR,CALI_PRESSURE2_PARA_OFFSET,buf,len);
+}
+
+void cali_flow_para1_read_flash(uint8_t *buf, uint32_t len)
+{
+    read_flash_data_offset(HARDWARE_ID_ADDR,CALI_FLOW1_PARA_OFFSET,buf,len);
+}
+void cali_flow_para2_read_flash(uint8_t *buf, uint32_t len)
+{
+    read_flash_data_offset(HARDWARE_ID_ADDR,CALI_FLOW2_PARA_OFFSET,buf,len);
+}
+
+void cali_volume_para_read_flash(uint8_t *buf, uint32_t len)
+{
+    read_flash_data_offset(HARDWARE_ID_ADDR,RESIDUAL_VOLUME_PARA_OFFSET,buf,len);
+}
+
+void flowmeter_para_read_flash(uint8_t *buf, uint32_t len)
+{
+    read_flash_data_offset(HARDWARE_ID_ADDR,FLOWMETER_PARA_OFFSET,buf,len);
+}

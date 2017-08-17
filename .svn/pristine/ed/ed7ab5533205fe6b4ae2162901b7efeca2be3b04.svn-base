@@ -1,0 +1,39 @@
+/**
+  ******************** (C) COPYRIGHT 2011 DJI **********************************
+  *
+  * @Project Name       : WKM2_CAN_LOADER.uvproj
+  * @File Name          : can_def.h
+  * @Environment        : keil mdk4.12/LPC1765/100M cclock
+  * @Author&Date        : 2011-10-17
+  * @Version            : 1.10
+  ******************************************************************************
+  * @Description
+  *
+  */
+/* Define to prevent recursive inclusion -------------------------------------*/
+#ifndef __CAN_DEF_H__
+#define __CAN_DEF_H__
+
+#include "../drivers/drivers_def.h"
+
+/* public define -------------------------------------------------------------*/
+/* can buffer size */
+#define CAN_BUFSIZE	          (512)	      /* 必须是2的n次幂 */
+
+/* unpack can package in ISR or task tick */
+#define UNPACK_ON_ISR         (0)
+
+/* 升级相关的ID号定义 */
+#ifdef __W610_CB__
+    #define CAN1_RX_ID		    (0x0510)
+    #define CAN1_TX_ID		    (0x0511)
+#else
+    #define CAN1_RX_ID		    (0x04fc)
+    #define CAN1_TX_ID		    (0x02fc)
+#endif
+
+#define CAN2_RX_ID		    (0x0413)
+#define CAN2_TX_ID		    (0x0412)
+
+/*******************  (C) COPYRIGHT 2011 DJI ************END OF FILE***********/
+#endif

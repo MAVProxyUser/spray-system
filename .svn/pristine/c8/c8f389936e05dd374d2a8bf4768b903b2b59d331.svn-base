@@ -1,0 +1,55 @@
+/**
+  ******************** (C) COPYRIGHT 2012 DJI **********************************
+  *
+  * @Project Name       : BL_WKM2_LED_IAP.uvproj
+  * @File Name          : cfg_unpack.h
+  * @Environment        : keil mdk4.12/LPC1765/100M cclock
+  * @Author&Date        : 2012-05-28 
+  * @Version            : 1.00
+  ******************************************************************************
+  * @Description
+  *	    Begginning of application   
+  */
+/* Define to prevent recursive inclusion -------------------------------------*/
+#ifndef __CFG_UNPACK_H__
+#define __CFG_UNPACK_H__
+
+#define CFG_CMDID_SCAN          	           		0x0101
+#define CFG_CMDID_SCAN_ACK                     		0x0102
+
+/*  firmware Éý¼¶ÃüÁîÂë */       
+#define CFG_CMDID_ENTRY_UPDATE                 		0x0fa0
+#define CFG_CMDID_UPGRADE_START                		0x0fa2
+#define CFG_CMDID_UPGRADE_DATA                 		0x0fa4
+#define CFG_CMDID_UPGRADE_END                  		0x0fa6
+#define CFG_CMDID_UPGRADE_CHECK                		0x0fa8
+
+#define CFG_CMDID_ENTRY_UPGRADE_ACK            		0x0fa1
+#define CFG_CMDID_UPGRADE_START_ACK            		0x0fa3    //START ack
+#define CFG_CMDID_UPGRADE_DATA_ACK	           		0x0fa5	 //download_start_ack
+#define CFG_CMDID_UPGRADE_END_ACK              		0x0fa7
+#define CFG_CMDID_UPGRADE_CHECK_ACK            		0x0fa9
+
+/* for DEVICEINFO */
+#define CFG_CMDID_DEVICEINFO_SET               		0x0fb0
+#define CFG_CMDID_DEVICEINFO_REQUEST           		0x0fb1
+#define CFG_CMDID_DEVICEINFO_REQUEST_ACK       		0x0fb2
+
+/* for blue request,bule password */
+#define CFG_CMD_ID_DEVICENAMEANDPWD_WRITE       	0x0609
+#define CFG_CMD_ID_DEVICENAMEANDPWD_WRITE_ACK    	0x060a
+#define CFG_CMD_ID_DEVICENAMEANDPWD_REQUEST      	0x060b
+#define CFG_CMD_ID_DEVICENAMEANDPWD_REQUEST_ACK  	CFG_CMD_ID_DEVICENAMEANDPWD_WRITE_ACK
+
+#define CFG_CMD_ID_SN_REQUEST	               		0x025c
+#define CFG_CMD_ID_SN_REQUEST_ACK              		0x025d
+
+
+#define CFG_CMD_MAX_SIZE							(512)
+
+void cfg_unpack_init( void );
+void cfg_unpack_tick( void );
+
+/*******************  (C) COPYRIGHT 2012 DJI ************END OF FILE***********/
+#endif
+

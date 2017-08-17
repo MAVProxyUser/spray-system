@@ -1,0 +1,27 @@
+/**
+  ******************** (C) COPYRIGHT 2011 DJI **********************************
+  *
+  * @Project Name       : WKM2_CAN_LOADER.uvproj
+  * @File Name          : can_ext_declares.h
+  * @Environment        : keil mdk4.12/LPC1765/100M cclock
+  * @Author&Date        : 2011-10-17 
+  * @Version            : 1.10
+  ******************************************************************************
+  * @Description
+  *	      
+  */
+/* Define to prevent recursive inclusion -------------------------------------*/
+#ifndef __CAN_EXT_DECLARES_H__
+#define __CAN_EXT_DECLARES_H__
+
+/* extern variables ----------------------------------------------------------*/
+extern CAN_MSG_Type       msgRxBuf;
+
+extern CPU_INT08U         upgradeRxBuf[CAN_BUFSIZE] ;	   //
+extern CAN_RING_BUF_Type  upgradeRxRingBuf          ;
+
+extern CPU_INT08U         upgradeTxBuf[CAN_BUFSIZE] ;
+extern CAN_RING_BUF_Type  upgradeTxRingBuf          ;
+
+/*******************  (C) COPYRIGHT 2011 DJI ************END OF FILE***********/
+#endif
